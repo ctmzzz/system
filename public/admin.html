@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台管理 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="main-layout">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                <span>成绩分析</span>
+            </div>
+            
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">管</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">管理员</div>
+                        <div class="user-role" id="userRoleText">系统管理员</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <header class="page-header">
+                <div class="header-left">
+                    <h1 class="page-title" style="display:inline-block;margin-right:12px;">后台管理</h1>
+                    <button class="btn" style="background:#dc2626;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:0.8rem;vertical-align:middle;position:relative;top:-1px;" onclick="clearAllData()">
+                        <svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:middle;margin-right:4px;"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                        清除所有数据
+                    </button>
+                </div>
+                <div class="header-right">
+                    <button class="logout-btn" onclick="logout()">退出登录</button>
+                </div>
+            </header>
+
+            <div class="page-content">
+                <!-- 标签页切换 -->
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="users">用户管理</button>
+                    <button class="tab-btn" data-tab="abnormal">异常账号</button>
+                </div>
+
+                <!-- 用户管理 -->
+                <div class="tab-content active" id="tab-users">
+                    <div class="table-container">
+                        <div class="table-header">
+                            <h3 class="table-title">用户列表</h3>
+                            <div style="display:flex;align-items:center;gap:8px;position:relative;">
+                                <div style="position:relative;">
+                                    <input type="text" id="userSearchInput" placeholder="搜索账号..." style="padding:8px 12px;padding-right:28px;border:2px solid var(--border-color);border-radius:8px;font-size:0.85rem;outline:none;width:160px;" oninput="filterUsers()">
+                                    <span id="userSearchClear" onclick="clearSearch()" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;color:#94a3b8;font-size:16px;line-height:1;padding:2px;" title="清除">✕</span>
+                                </div>
+                                <div class="table-actions">
+                                    <button class="btn btn-secondary" onclick="openModal('batchUserModal')" style="margin-right:8px;">
+                                        <svg viewBox="0 0 24 24" width="16" height="16"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v2h12V3z"/></svg>
+                                        批量导入用户
+                                    </button>
+                                    <button class="btn btn-primary" onclick="openModal('userModal')">
+                                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                                        添加用户
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>账号（工号/学号）</th>
+                                    <th>姓名</th>
+                                    <th>密码</th>
+                                    <th>角色</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 异常账号管理 -->
+                <div class="tab-content" id="tab-abnormal">
+                    <div class="table-container">
+                        <div class="table-header">
+                            <h3 class="table-title">异常账号列表</h3>
+                            <div class="table-actions">
+                                <button class="btn btn-secondary" onclick="refreshAbnormalAccounts()">
+                                    <svg viewBox="0 0 24 24" width="16" height="16"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                                    刷新
+                                </button>
+                            </div>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>账号</th>
+                                    <th>姓名</th>
+                                    <th>类型</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="abnormalAccountsTable">
+                                <tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:40px;">暂无异常账号</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+// 异常账号标签页切换时自动加载（内联，绕过缓存）
+(function() {
+    var tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            if (this.dataset.tab === 'abnormal') {
+                loadAbnormalAccounts();
+            }
+        });
+    });
+
+    async function loadAbnormalAccounts() {
+        try {
+            var res = await fetch('/api/abnormal-accounts');
+            var data = await res.json();
+            var tbody = document.getElementById('abnormalAccountsTable');
+            if (!data.success || !data.data || data.data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:40px;">暂无异常账号</td></tr>';
+                return;
+            }
+            var typeLabels = { 'kick': '互踢', 'abnormal': '异常', 'fail': '登录失败' };
+            tbody.innerHTML = data.data.map(function(acc) {
+                var timeStr = acc.time ? new Date(acc.time).toLocaleString() : '-';
+                return '<tr>' +
+                    '<td>' + acc.employee_id + '</td>' +
+                    '<td>' + acc.name + '</td>' +
+                    '<td>' + (typeLabels[acc.type] || acc.type || '-') + '</td>' +
+                    '<td><button class="btn btn-secondary" onclick="removeAbnormal(\'' + acc.employee_id + '\')" style="padding:4px 12px;font-size:0.8rem;">解除异常</button></td>' +
+                    '</tr>';
+            }).join('');
+        } catch(e) {}
+    }
+
+    window.removeAbnormal = async function(employeeId) {
+        if (!confirm('确定要解除账号 ' + employeeId + ' 的异常状态吗？')) return;
+        try {
+            var res = await fetch('/api/abnormal-accounts/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ employee_id: employeeId })
+            });
+            var data = await res.json();
+            if (data.success) {
+                alert('已解除异常状态');
+                loadAbnormalAccounts();
+            } else {
+                alert(data.message || '操作失败');
+            }
+        } catch(e) {
+            alert('操作失败');
+        }
+    };
+})();
+</script>
+
+    <!-- 用户模态框 -->
+    <div class="modal-overlay" id="userModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">添加用户</h2>
+                <button class="modal-close" onclick="closeModal('userModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveUser(event)">
+                <div class="form-group">
+                    <label>账号</label>
+                    <input type="text" id="userEmployeeId" placeholder="请输入账号" required oninput="validateUserAccount()">
+                    <small id="accountTip" style="font-size:0.78rem;color:#64748b;margin-top:3px;display:block;"></small>
+                </div>
+                <div class="form-group">
+                    <label>姓名</label>
+                    <input type="text" id="userNameInput" required>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="userPassword" required>
+                </div>
+                <div class="form-group">
+                    <label>角色</label>
+                    <select id="userRole" style="width:100%;padding:12px 14px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;outline:none;" onchange="onUserRoleChange()">
+                        <option value="teacher">教师</option>
+                        <option value="class">班级</option>
+                        <option value="student">学生</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('userModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 批量导入用户模态框 -->
+    <div class="modal-overlay" id="batchUserModal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2 class="modal-title">批量导入用户</h2>
+                <button class="modal-close" onclick="closeModal('batchUserModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <div class="modal-form">
+                <div class="form-group">
+                    <label>上传Excel文件</label>
+                    <div class="file-upload-area" id="userFileUploadArea">
+                        <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                        <p>点击选择文件或将文件拖拽到此处</p>
+                        <small>支持 .xlsx, .xls 格式（列顺序：账号，姓名，密码，角色）</small>
+                        <input type="file" id="userExcelFileInput" accept=".xlsx,.xls" style="display:none;" onchange="handleUserFileSelect(event)">
+                    </div>
+                    <div id="userFileNameDisplay" style="margin-top:10px;color:var(--primary-color);font-weight:500;"></div>
+                    <div id="userPreviewTable" style="margin-top:15px;max-height:200px;overflow-y:auto;"></div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('batchUserModal')">取消</button>
+                    <button type="button" class="btn btn-primary" id="userImportBtn" onclick="batchImportUsers()" disabled>导入</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 班级模态框 -->
+    <div class="modal-overlay" id="classModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">添加班级</h2>
+                <button class="modal-close" onclick="closeModal('classModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveClass(event)">
+                <div class="form-group">
+                    <label>班级名称</label>
+                    <input type="text" id="className" placeholder="如：高一(1)班" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('classModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 学生模态框 -->
+    <div class="modal-overlay" id="studentModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">添加学生</h2>
+                <button class="modal-close" onclick="closeModal('studentModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveStudent(event)">
+                <div class="form-group">
+                    <label>学号</label>
+                    <input type="text" id="studentId" required>
+                </div>
+                <div class="form-group">
+                    <label>姓名</label>
+                    <input type="text" id="studentName" required>
+                </div>
+                <div class="form-group">
+                    <label>班级</label>
+                    <select id="studentClass">
+                        <option value="">请选择班级</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('studentModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 批量导入学生模态框 -->
+    <div class="modal-overlay" id="batchStudentModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">批量导入学生</h2>
+                <button class="modal-close" onclick="closeModal('batchStudentModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveBatchStudents(event)">
+                <div class="form-group">
+                    <label>班级</label>
+                    <select id="batchStudentClass">
+                        <option value="">请选择班级</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>学生数据（JSON格式）</label>
+                    <textarea id="batchStudentData" placeholder='[{"student_id":"2024001","name":"张三"},{"student_id":"2024002","name":"李四"}]'></textarea>
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: -10px;">
+                    提示：输入JSON数组，每个对象包含 student_id（学号）和 name（姓名）
+                </p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('batchStudentModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">导入</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 考试模态框 -->
+    <div class="modal-overlay" id="examModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">添加考试</h2>
+                <button class="modal-close" onclick="closeModal('examModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveExam(event)">
+                <div class="form-group">
+                    <label>考试名称</label>
+                    <input type="text" id="examName" placeholder="如：2024年第一学期期中考试" required>
+                </div>
+                <div class="form-group">
+                    <label>考试日期</label>
+                    <input type="date" id="examDate" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('examModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 成绩模态框 -->
+    <div class="modal-overlay" id="scoreModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">添加成绩</h2>
+                <button class="modal-close" onclick="closeModal('scoreModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveScore(event)">
+                <div class="form-group">
+                    <label>考试</label>
+                    <select id="scoreExam" required>
+                        <option value="">请选择考试</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>学生</label>
+                    <select id="scoreStudent" required>
+                        <option value="">请选择学生</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>总分</label>
+                    <input type="number" id="scoreTotal" step="0.01" min="0" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('scoreModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 批量导入成绩模态框 -->
+    <div class="modal-overlay" id="batchScoreModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">批量导入成绩</h2>
+                <button class="modal-close" onclick="closeModal('batchScoreModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveBatchScores(event)">
+                <div class="form-group">
+                    <label>考试</label>
+                    <select id="batchScoreExam" required>
+                        <option value="">请选择考试</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>成绩数据（JSON格式）</label>
+                    <textarea id="batchScoreData" placeholder='[{"student_id":"2024001","total_score":580},{"student_id":"2024002","total_score":595}]'></textarea>
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: -10px;">
+                    提示：输入JSON数组，每个对象包含 student_id（学号）和 total_score（总分）
+                </p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('batchScoreModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">导入</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    
+
+    <!-- Toast 提示 -->
+    <div class="toast" id="toast"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/collab.js"></script>
+    <script>
+        // 内联的 renderUsers 函数，确保按钮显示
+        window.renderUsers = function(users) {
+            const tbody = document.getElementById('usersTable');
+            if (!users || users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-secondary);">暂无数据</td></tr>';
+                return;
+            }
+            const ROLE_LABELS = { 'admin': '管理员', 'teacher': '教师', 'class': '班级', 'student': '学生' };
+            tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td>${user.employee_id}</td>
+                    <td>${user.name}</td>
+                    <td>${user.plain_password || '-'}</td>
+                    <td>${ROLE_LABELS[user.role] || '教师'}</td>
+                    <td>
+                        <div class="action-btns">
+                            <button class="action-btn edit" onclick="editUser(${user.id}, '${user.employee_id}', '${user.name}', '${user.role}', '${user.plain_password || ''}')" title="编辑" style="background:#E0F2FE;">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#0284C7"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                            </button>
+                            ${user.employee_id === 'admin' ? '' : `
+                            <button class="action-btn" onclick="markAsAbnormal('${user.employee_id}', '${user.name}')" title="标记异常" style="background:#FEE2E2;color:#EF4444;">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#EF4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                            </button>
+                            <button class="action-btn delete" onclick="deleteUser(${user.id})" title="删除" style="background:#FEE2E2;">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#EF4444"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                            </button>`}
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        };
+
+        // 内联的 markAsAbnormal 函数
+        window.markAsAbnormal = async function(employeeId, name) {
+            if (!confirm(`确定要将账号 ${name} (${employeeId}) 标记为异常吗？\n\n标记后该账号将无法登录！`)) return;
+            try {
+                const res = await fetch('/api/abnormal-accounts/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ employee_id: employeeId, name: name })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('已标记为异常');
+                    loadUsers();
+                } else {
+                    alert(data.message || '操作失败');
+                }
+            } catch (err) {
+                alert('操作失败');
+            }
+        };
+    </script>
+    <script src="/js/admin.js?v=2"></script>
+    <script>
+        // 文件上传区域点击事件
+        document.getElementById('userFileUploadArea').addEventListener('click', function() {
+            document.getElementById('userExcelFileInput').click();
+        });
+
+        // 拖拽事件
+        const userUploadArea = document.getElementById('userFileUploadArea');
+        userUploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            this.classList.add('dragover');
+        });
+        userUploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+        });
+        userUploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                document.getElementById('userExcelFileInput').files = files;
+                handleUserFileSelect({ target: { files: files } });
+            }
+        });
+
+        // ====== 账号格式校验 ======
+        const ACCOUNT_RULES = {
+            teacher: { pattern: /^\d{4}$/, hint: '教师账号：4位数字，如 1001' },
+            student: { pattern: /^\d{10}$/, hint: '学生学号：10位数字，如 2024001001' },
+            class:    { pattern: /^\d{5}$/, hint: '班级账号：5位数字，如 25008' },
+            admin:     { pattern: /^.{1,20}$/,  hint: '管理员：任意字符' }
+        };
+
+        function onUserRoleChange() {
+            const role = document.getElementById('userRole').value;
+            const input = document.getElementById('userEmployeeId');
+            const tip = document.getElementById('accountTip');
+            const rule = ACCOUNT_RULES[role] || ACCOUNT_RULES.admin;
+            tip.textContent = rule.hint;
+            input.placeholder = role === 'student' ? '10位学号' : (role === 'teacher' ? '4位工号' : (role === 'class' ? '5位班级号' : '请输入账号'));
+            validateUserAccount();
+        }
+
+        function validateUserAccount() {
+            const idEl = document.getElementById('userEmployeeId');
+            const tip = document.getElementById('accountTip');
+            const role = document.getElementById('userRole').value;
+            const val = idEl.value.trim();
+            const rule = ACCOUNT_RULES[role] || ACCOUNT_RULES.admin;
+
+            if (!val) return true; // 空值不校验（required会处理）
+            if (!rule.pattern.test(val)) {
+                tip.style.color = '#EF4444';
+                idEl.style.borderColor = '#EF4444';
+                return false;
+            }
+            tip.style.color = '#64748b';
+            idEl.style.borderColor = '';
+            return true;
+        }
+    
+        function openModal(id){
+            const el = document.getElementById(id);
+            el.style.display = "flex";
+        }
+
+        function closeModal(id){
+            const el = document.getElementById(id);
+            el.style.display = "none";
+        }
+
+        // 选项卡切换（内联确保执行）
+        document.querySelectorAll('.tab-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+                document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+                this.classList.add('active');
+                var tab = document.getElementById('tab-' + this.dataset.tab);
+                if (tab) tab.classList.add('active');
+                // 切换到异常账号时刷新
+                if (this.dataset.tab === 'abnormal' && typeof refreshAbnormalAccounts === 'function') {
+                    refreshAbnormalAccounts();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

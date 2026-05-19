@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作业数据 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 20px; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        .page-header { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
+        .page-title { font-size: 24px; color: #1E1B4B; margin: 0; }
+        .page-subtitle { color: #666; margin-top: 8px; }
+        .content-wrapper { display: flex; gap: 20px; }
+        .left-panel { flex: 1; background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); min-width: 0; }
+        .right-panel { width: 380px; flex-shrink: 0; background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        
+        /* 日历样式 */
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .calendar-nav { display: flex; gap: 8px; }
+        .calendar-nav button { padding: 8px 16px; border: 2px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+        .calendar-nav button:hover { border-color: #4F46E5; }
+        .calendar-title { font-size: 20px; font-weight: 600; color: #1E1B4B; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+        .calendar-day-header { text-align: center; padding: 12px 8px; font-weight: 600; color: #64748b; font-size: 13px; text-transform: uppercase; }
+        .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #e2e8f0; border-radius: 8px; cursor: pointer; transition: all 0.2s; background: white; }
+        .calendar-day:hover { border-color: #4F46E5; background: #f0f9ff; }
+        .calendar-day.today { border-color: #4F46E5; background: #eef2ff; font-weight: 600; }
+        .calendar-day.selected { border-color: #10B981; background: #dcfce7; font-weight: 600; }
+        .calendar-day.has-unsubmitted { border-color: #FCA5A5; background: #FEF2F2; }
+        .calendar-day.other-month { color: #cbd5e1; }
+        .calendar-day-number { font-size: 16px; flex-shrink: 0; }
+        .calendar-student-names { font-size: 10px; color: #EF4444; margin-top: 2px; text-align: center; line-height: 1.2; width: 100%; padding: 0 4px; box-sizing: border-box; max-height: 100px; overflow-y: auto; }
+        
+        /* 右边面板样式 */
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; }
+        .form-group select, .form-group input[type="text"], .form-group input[type="date"] { width: 100%; padding: 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+        .form-group select:focus, .form-group input:focus { outline: none; border-color: #4F46E5; }
+        .student-list { border: 2px solid #e2e8f0; border-radius: 8px; max-height: 400px; overflow-y: auto; }
+        .student-item { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; transition: all 0.2s; }
+        .student-item:last-child { border-bottom: none; }
+        .student-item:hover { background: #f8fafc; }
+        .student-item.selected { background: #eef2ff; }
+        .student-left { display: flex; align-items: center; gap: 8px; flex: 1; }
+        .student-right { display: flex; align-items: center; gap: 6px; }
+        .student-checkbox { width: 16px !important; height: 16px !important; margin: 0 !important; padding: 0 !important; accent-color: #4F46E5; cursor: pointer; flex-shrink: 0; }
+        .student-name { min-width: 0; color: #1E1B4B; font-size: 14px; line-height: 1.4; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #4F46E5; color: white; }
+        .btn-primary:hover { background: #4338CA; }
+        .btn-success { background: #10B981; color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-block { width: 100%; }
+        .section-title { font-size: 16px; font-weight: 600; color: #1E1B4B; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
+        .selected-count { color: #64748b; font-size: 13px; margin-top: 8px; }
+        
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 24px; border-radius: 8px; color: white; font-size: 14px; z-index: 2000; }
+        .toast-success { background: #10B981; }
+        .toast-error { background: #EF4444; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <h1 class="page-title">作业数据</h1>
+            <p class="page-subtitle">管理学生作业提交情况</p>
+        </div>
+        
+        <div class="content-wrapper">
+            <div class="left-panel">
+                <div class="section-title">日历</div>
+                <div class="calendar-header">
+                    <div class="calendar-nav">
+                        <button onclick="prevMonth()">&lt; 上月</button>
+                    </div>
+                    <div class="calendar-title" id="calendarTitle"></div>
+                    <div class="calendar-nav">
+                        <button onclick="nextMonth()">下月 &gt;</button>
+                    </div>
+                </div>
+                <div class="calendar-grid" id="calendarGrid"></div>
+            </div>
+            
+            <div class="right-panel">
+                <div class="section-title">作业设置</div>
+                
+                <div class="form-group">
+                    <label>选择学期</label>
+                    <select id="semesterSelect">
+                        <option value="高一上">高一上</option>
+                        <option value="高一下">高一下</option>
+                        <option value="高二上">高二上</option>
+                        <option value="高二下">高二下</option>
+                        <option value="高三上">高三上</option>
+                        <option value="高三下">高三下</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>选择班级</label>
+                    <select id="classSelect">
+                        <option value="">请选择班级</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>选择学科</label>
+                    <select id="subjectSelect">
+                        <option value="">请选择学科</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>选择日期</label>
+                    <input type="date" id="dateInput">
+                </div>
+                
+                <div class="form-group">
+                    <label>未提交作业的学生（可多选）</label>
+                    <div class="student-list" id="studentList">
+                        <div style="padding: 40px; text-align: center; color: #94a3b8;">请先选择班级</div>
+                    </div>
+                    <div class="selected-count" id="selectedCount">已选择 0 人</div>
+                </div>
+                
+                <button class="btn btn-primary btn-block" onclick="saveHomeworkData()">保存作业数据</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentDate = new Date();
+        let selectedDate = new Date();
+        let selectedStudents = new Set();
+        let lateStudents = new Set();
+        let homeworkDates = {};
+        let currentUser = null;
+
+        document.getElementById('semesterSelect').addEventListener('change', () => {
+            loadSubjects();
+            loadCalendarMarkers();
+            loadHomeworkData();
+        });
+        document.getElementById('classSelect').addEventListener('change', () => {
+            loadSubjects();
+            loadStudents();
+            loadCalendarMarkers();
+            loadHomeworkData();
+        });
+        document.getElementById('subjectSelect').addEventListener('change', () => {
+            loadHomeworkData();
+        });
+        document.getElementById('dateInput').addEventListener('change', (e) => {
+            selectedDate = new Date(e.target.value);
+            renderCalendar();
+            loadHomeworkData();
+        });
+
+        async function checkAuth() {
+            try {
+                const res = await fetch('/api/auth/check');
+                const data = await res.json();
+                if (!data.loggedIn) {
+                    window.location.href = '/login';
+                    return null;
+                }
+                currentUser = data.user;
+                window.currentUser = data.user;
+                return data.user;
+            } catch (err) {
+                window.location.href = '/login';
+                return null;
+            }
+        }
+
+        function init() {
+            checkAuth().then(user => {
+                if (!user) return;
+                const today = new Date();
+                document.getElementById('dateInput').value = formatDate(today);
+                renderCalendar();
+                loadClasses();
+                // 班级账号自动连接协同
+                if (window.Collab && user && user.role === 'class') {
+                    Collab.connect();
+                }
+            });
+        };
+
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function normalizeDateKey(dateVal) {
+            if (!dateVal) return '';
+            const s = String(dateVal).trim();
+            return s.length >= 10 ? s.slice(0, 10) : s;
+        }
+
+        function getUnsubmittedNames(dateStr) {
+            const entries = homeworkDates[normalizeDateKey(dateStr)];
+            if (!Array.isArray(entries)) return [];
+            const result = [];
+            entries.forEach(entry => {
+                // 未交
+                const unsubmittedNames = (entry.unsubmitted || []).filter(n => n && String(n).trim());
+                if (unsubmittedNames.length > 0) {
+                    result.push(`<span style="color:#EF4444">${entry.subject}（未交）: ${unsubmittedNames.join('、')}</span>`);
+                }
+                // 补交
+                const lateNames = (entry.late || []).filter(n => n && String(n).trim());
+                if (lateNames.length > 0) {
+                    result.push(`<span style="color:#F59E0B">${entry.subject}（补交）: ${lateNames.join('、')}</span>`);
+                }
+            });
+            return result;
+        }
+
+        function renderCalendar() {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            
+            document.getElementById('calendarTitle').textContent = 
+                `${year}年 ${month + 1}月`;
+            
+            const grid = document.getElementById('calendarGrid');
+            grid.innerHTML = '';
+            
+            const dayHeaders = ['日', '一', '二', '三', '四', '五', '六'];
+            dayHeaders.forEach(day => {
+                const div = document.createElement('div');
+                div.className = 'calendar-day-header';
+                div.textContent = day;
+                grid.appendChild(div);
+            });
+            
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const startDay = firstDay.getDay();
+            const prevLastDay = new Date(year, month, 0);
+            
+            for (let i = startDay - 1; i >= 0; i--) {
+                const day = prevLastDay.getDate() - i;
+                const div = document.createElement('div');
+                div.className = 'calendar-day other-month';
+                div.innerHTML = `<span class="calendar-day-number">${day}</span>`;
+                grid.appendChild(div);
+            }
+            
+            for (let day = 1; day <= lastDay.getDate(); day++) {
+                const date = new Date(year, month, day);
+                const dateStr = formatDate(date);
+                const div = document.createElement('div');
+                let classes = 'calendar-day';
+                
+                const today = new Date();
+                if (date.toDateString() === today.toDateString()) {
+                    classes += ' today';
+                }
+                
+                if (date.toDateString() === selectedDate.toDateString()) {
+                    classes += ' selected';
+                }
+                
+                const unsubmittedNames = getUnsubmittedNames(dateStr);
+                if (unsubmittedNames.length > 0) {
+                    classes += ' has-unsubmitted';
+                }
+
+                div.className = classes;
+                let html = `<span class="calendar-day-number">${day}</span>`;
+                if (unsubmittedNames.length > 0) {
+                    html += `<div class="calendar-student-names">${unsubmittedNames.join('<br>')}</div>`;
+                }
+                div.innerHTML = html;
+                div.onclick = () => selectDate(date);
+                grid.appendChild(div);
+            }
+            
+            const remainingDays = 42 - (startDay + lastDay.getDate());
+            for (let day = 1; day <= remainingDays; day++) {
+                const div = document.createElement('div');
+                div.className = 'calendar-day other-month';
+                div.innerHTML = `<span class="calendar-day-number">${day}</span>`;
+                grid.appendChild(div);
+            }
+        }
+
+        function selectDate(date) {
+            selectedDate = new Date(date);
+            document.getElementById('dateInput').value = formatDate(selectedDate);
+            renderCalendar();
+            loadHomeworkData();
+        }
+
+        function prevMonth() {
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            renderCalendar();
+            loadCalendarMarkers();
+        }
+
+        function nextMonth() {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            renderCalendar();
+            loadCalendarMarkers();
+        }
+
+        function loadClasses() {
+            fetch('/api/classes')
+                .then(r => r.json())
+                .then(data => {
+                    const select = document.getElementById('classSelect');
+                    if (!data.success || !data.data || data.data.length === 0) {
+                        select.innerHTML = '<option value="">暂无班级</option>';
+                        return;
+                    }
+                    const sortedClasses = [...data.data].sort((a, b) => b.id - a.id);
+                    select.innerHTML = '<option value="">请选择班级</option>' +
+                        sortedClasses.map(cls => `<option value="${cls.id}">${cls.name}</option>`).join('');
+                    
+                    // 班级账号：自动选中对应班级并禁用下拉
+                    if (currentUser && currentUser.role === 'class') {
+                        const classNo = currentUser.employee_id;
+                        const matched = sortedClasses.find(c => c.name === classNo || c.name === classNo + '班级');
+                        if (matched) {
+                            select.value = matched.id;
+                            select.disabled = true;
+                        }
+                    }
+                    
+                    // 默认选中第一个班级
+                    if (sortedClasses.length > 0 && !select.value) {
+                        select.value = sortedClasses[0].id;
+                    }
+                    if (select.value) {
+                        loadSubjects();
+                        loadStudents();
+                        loadCalendarMarkers();
+                    }
+                })
+                .catch(err => {
+                    console.error('加载班级列表失败', err);
+                    showToast('加载班级列表失败', 'error');
+                });
+        }
+
+        function loadSubjects() {
+            const semester = document.getElementById('semesterSelect').value;
+            const classId = document.getElementById('classSelect').value;
+            
+            if (!classId) {
+                document.getElementById('subjectSelect').innerHTML = '<option value="">请选择学科</option>';
+                return;
+            }
+            
+            let url = '/api/homework?';
+            const params = [];
+            if (semester) params.push('semester=' + encodeURIComponent(semester));
+            if (classId) params.push('class_id=' + encodeURIComponent(classId));
+            url += params.join('&');
+
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    const select = document.getElementById('subjectSelect');
+                    if (!data.success || !data.data || data.data.length === 0) {
+                        select.innerHTML = '<option value="">暂无学科</option>';
+                        return;
+                    }
+                    select.innerHTML = '<option value="">请选择学科</option>' +
+                        data.data.map(hw => `<option value="${hw.subject}">${hw.subject}</option>`).join('');
+                    // 默认选中第一个学科
+                    if (data.data.length > 0) {
+                        select.value = data.data[0].subject;
+                        loadHomeworkData();
+                    }
+                })
+                .catch(err => {
+                    console.error('加载学科失败', err);
+                    showToast('加载学科失败', 'error');
+                });
+        }
+
+        function loadStudents() {
+            const classId = document.getElementById('classSelect').value;
+            const listDiv = document.getElementById('studentList');
+            
+            console.log('loadStudents: classId =', classId);
+            
+            if (!classId) {
+                listDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: #94a3b8;">请先选择班级</div>';
+                return;
+            }
+            
+            fetch(`/api/students?class_id=${classId}`)
+                .then(r => r.json())
+                .then(data => {
+                    console.log('loadStudents: data =', data);
+                    if (!data.success || !data.data || data.data.length === 0) {
+                        listDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: #94a3b8;">暂无学生</div>';
+                        return;
+                    }
+                    
+                    selectedStudents.clear();
+                    lateStudents.clear();
+                    updateSelectedCount();
+                    
+                    listDiv.innerHTML = data.data.map(student => `
+                        <div class="student-item" data-student-id="${student.id}">
+                            <div class="student-left">
+                                <input type="checkbox" class="student-checkbox" id="student-${student.id}" onchange="toggleStudent(${student.id}, this)">
+                                <span class="student-name">${student.name}</span>
+                            </div>
+                            <div class="student-right">
+                                <span class="late-label">补交</span>
+                                <input type="checkbox" class="student-checkbox" id="late-${student.id}" onchange="toggleLate(${student.id}, this)">
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    // 加载完学生后，加载作业数据
+                    loadHomeworkData();
+                })
+                .catch(err => {
+                    console.error('加载学生失败', err);
+                    showToast('加载学生失败', 'error');
+                });
+        }
+
+        function toggleStudent(studentId, checkbox) {
+            const studentItem = checkbox.closest('.student-item');
+            if (selectedStudents.has(studentId)) {
+                selectedStudents.delete(studentId);
+                checkbox.checked = false;
+                studentItem.classList.remove('selected');
+                // 取消学生勾选时，同时取消补交勾选
+                if (lateStudents.has(studentId)) {
+                    lateStudents.delete(studentId);
+                    const lateCheckbox = document.getElementById(`late-${studentId}`);
+                    if (lateCheckbox) {
+                        lateCheckbox.checked = false;
+                    }
+                }
+            } else {
+                selectedStudents.add(studentId);
+                checkbox.checked = true;
+                studentItem.classList.add('selected');
+            }
+            updateSelectedCount();
+        }
+
+        function toggleLate(studentId, checkbox) {
+            if (lateStudents.has(studentId)) {
+                lateStudents.delete(studentId);
+                checkbox.checked = false;
+            } else {
+                lateStudents.add(studentId);
+                checkbox.checked = true;
+                // 自动勾选学生
+                if (!selectedStudents.has(studentId)) {
+                    selectedStudents.add(studentId);
+                    const studentItem = document.querySelector(`.student-item[data-student-id="${studentId}"]`);
+                    if (studentItem) {
+                        const studentCheckbox = studentItem.querySelector('.student-left .student-checkbox');
+                        if (studentCheckbox) {
+                            studentCheckbox.checked = true;
+                        }
+                        studentItem.classList.add('selected');
+                    }
+                    updateSelectedCount();
+                }
+            }
+        }
+
+        function updateSelectedCount() {
+            document.getElementById('selectedCount').textContent = `已选择 ${selectedStudents.size} 人`;
+        }
+
+        function loadCalendarMarkers() {
+            const semester = document.getElementById('semesterSelect').value;
+            const classId = document.getElementById('classSelect').value;
+            
+            if (!classId) {
+                homeworkDates = {};
+                renderCalendar();
+                return;
+            }
+            
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth() + 1;
+            
+            fetch(`/api/homework-data/calendar?semester=${encodeURIComponent(semester)}&class_id=${encodeURIComponent(classId)}&year=${year}&month=${month}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        homeworkDates = {};
+                        for (const [dateKey, subjects] of Object.entries(data.data || {})) {
+                            const key = normalizeDateKey(dateKey);
+                            const entries = [];
+                            for (const [subject, info] of Object.entries(subjects || {})) {
+                                const unsubmitted = (info.unsubmitted || []).filter(n => n && String(n).trim());
+                                const late = (info.late || []).filter(n => n && String(n).trim());
+                                if (unsubmitted.length > 0 || late.length > 0) {
+                                    entries.push({ subject, unsubmitted, late });
+                                }
+                            }
+                            if (entries.length > 0) {
+                                homeworkDates[key] = entries;
+                            }
+                        }
+                        renderCalendar();
+                    }
+                })
+                .catch(err => console.error(err));
+        }
+        
+        function loadHomeworkData() {
+            const semester = document.getElementById('semesterSelect').value;
+            const classId = document.getElementById('classSelect').value;
+            const subject = document.getElementById('subjectSelect').value;
+            const date = document.getElementById('dateInput').value;
+            
+            if (!classId || !subject || !date) {
+                // 重置选择
+                selectedStudents.clear();
+                lateStudents.clear();
+                updateSelectedCount();
+                return;
+            }
+            
+            fetch(`/api/homework-data?semester=${encodeURIComponent(semester)}&class_id=${encodeURIComponent(classId)}&subject=${encodeURIComponent(subject)}&date=${encodeURIComponent(date)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        // 选中未提交的学生
+                        selectedStudents = new Set(data.data.filter(d => !d.submitted).map(d => d.student_id));
+                        // 选中补交的学生
+                        lateStudents = new Set(data.data.filter(d => d.late).map(d => d.student_id));
+                        updateSelectedCount();
+                        
+                        // 更新UI
+                        const studentItems = document.querySelectorAll('.student-item');
+                        studentItems.forEach(item => {
+                            const studentId = parseInt(item.dataset.studentId);
+                            const checkbox = document.getElementById(`student-${studentId}`);
+                            const lateCheckbox = document.getElementById(`late-${studentId}`);
+                            
+                            if (checkbox) {
+                                if (selectedStudents.has(studentId)) {
+                                    checkbox.checked = true;
+                                    item.classList.add('selected');
+                                } else {
+                                    checkbox.checked = false;
+                                    item.classList.remove('selected');
+                                }
+                            }
+                            
+                            if (lateCheckbox) {
+                                lateCheckbox.checked = lateStudents.has(studentId);
+                            }
+                        });
+                    }
+                })
+                .catch(err => console.error(err));
+        }
+        
+        function saveHomeworkData() {
+            const semester = document.getElementById('semesterSelect').value;
+            const classId = document.getElementById('classSelect').value;
+            const subject = document.getElementById('subjectSelect').value;
+            const date = document.getElementById('dateInput').value;
+            
+            if (!classId) {
+                showToast('请选择班级', 'error');
+                return;
+            }
+            if (!subject) {
+                showToast('请选择学科', 'error');
+                return;
+            }
+            if (!date) {
+                showToast('请选择日期', 'error');
+                return;
+            }
+            
+            fetch('/api/homework-data/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    semester,
+                    class_id: classId,
+                    subject,
+                    date,
+                    unsubmitted_student_ids: Array.from(selectedStudents),
+                    late_student_ids: Array.from(lateStudents)
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('保存成功', 'success');
+                    loadCalendarMarkers();
+                    // 通过协同向其他设备广播更新
+                    if (window.Collab && Collab.isConnected()) {
+                        Collab.sendEdit('homework_data', classId + '_' + date, {
+                            class_id: classId,
+                            subject: subject,
+                            date: date
+                        });
+                    }
+                } else {
+                    showToast(data.message, 'error');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                showToast('保存失败', 'error');
+            });
+        }
+
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = 'toast toast-' + type;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        init();
+    </script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/collab.js"></script>
+    <script>
+    (function() {
+        if (!window.Collab) return;
+        Collab.on('collab_update', function(data) {
+            if (data.docType === 'homework_data') {
+                console.log('[作业数据] 收到协同更新，刷新数据');
+                if (typeof loadCalendarMarkers === 'function') loadCalendarMarkers();
+                if (typeof loadHomeworkData === 'function') loadHomeworkData();
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

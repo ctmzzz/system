@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作业管理 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .page-header { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .page-title { font-size: 24px; color: #1E1B4B; margin: 0; }
+        .page-subtitle { color: #666; margin-top: 8px; }
+        .content-card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; }
+        .toolbar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+        .toolbar select, .toolbar input { padding: 10px 14px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+        .toolbar select:focus, .toolbar input:focus { outline: none; border-color: #4F46E5; }
+        .btn { padding: 10px 18px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #4F46E5; color: white; }
+        .btn-primary:hover { background: #4338CA; }
+        .btn-success { background: #10B981; color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-danger { background: #EF4444; color: white; }
+        .btn-danger:hover { background: #DC2626; }
+        .btn-secondary { background: #6B7280; color: white; }
+        .btn-secondary:hover { background: #4B5563; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f8fafc; color: #64748b; font-weight: 600; font-size: 13px; text-transform: uppercase; }
+        tr:hover { background: #f8fafc; }
+        .empty-state { text-align: center; padding: 60px 20px; color: #94a3b8; }
+        .empty-icon { font-size: 48px; margin-bottom: 16px; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .modal { background: white; border-radius: 12px; max-width: 500px; width: 90%; max-height: 90vh; overflow: auto; }
+        .modal-header { padding: 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+        .modal-title { font-size: 18px; font-weight: 600; color: #1E1B4B; }
+        .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #94a3b8; }
+        .modal-close:hover { color: #64748b; }
+        .modal-body { padding: 20px; }
+        .modal-footer { padding: 16px 20px; border-top: 1px solid #e2e8f0; display: flex; gap: 12px; justify-content: flex-end; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #374151; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+        .form-group textarea { min-height: 100px; resize: vertical; }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus { outline: none; border-color: #4F46E5; }
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 24px; border-radius: 8px; color: white; font-size: 14px; z-index: 2000; }
+        .toast-success { background: #10B981; }
+        .toast-error { background: #EF4444; }
+        .action-btns { display: flex; gap: 8px; }
+        .action-btns .btn { padding: 6px 12px; font-size: 12px; }
+        .import-hint { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+        textarea#importData { font-family: monospace; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">作业管理</h1>
+                <p class="page-subtitle">管理学科作业数据</p>
+            </div>
+        </div>
+        <div class="content-card">
+            <div class="toolbar">
+                <select id="semesterSelect">
+                    <option value="">全部学期</option>
+                    <option value="高一上">高一上</option>
+                    <option value="高一下">高一下</option>
+                    <option value="高二上">高二上</option>
+                    <option value="高二下">高二下</option>
+                    <option value="高三上">高三上</option>
+                    <option value="高三下">高三下</option>
+                </select>
+                <select id="classSelect">
+                    <option value="">选择班级</option>
+                </select>
+                <button class="btn btn-success" onclick="openImportModal()">导入学科</button>
+                <button class="btn btn-primary" onclick="openAddModal()">添加学科</button>
+            </div>
+            <table id="homeworkTable">
+                <thead>
+                    <tr>
+                        <th>学期</th>
+                        <th>学科</th>
+                        <th>作业内容</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="homeworkTableBody">
+                    <tr><td colspan="4" class="empty-state">请选择学期查看作业数据</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="addModal" style="display:none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">添加学科</h3>
+                <button class="modal-close" onclick="closeModal('addModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>学期</label>
+                    <select id="modalSemester">
+                        <option value="高一上">高一上</option>
+                        <option value="高一下">高一下</option>
+                        <option value="高二上">高二上</option>
+                        <option value="高二下">高二下</option>
+                        <option value="高三上">高三上</option>
+                        <option value="高三下">高三下</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>学科名称</label>
+                    <input type="text" id="modalSubject" placeholder="请输入学科名称">
+                </div>
+                <div class="form-group">
+                    <label>作业内容</label>
+                    <textarea id="modalContent" placeholder="请输入作业内容（可选）"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveHomework()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="importModal" style="display:none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">导入学科数据</h3>
+                <button class="modal-close" onclick="closeModal('importModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>选择学期</label>
+                    <select id="importSemester">
+                        <option value="高一上">高一上</option>
+                        <option value="高一下">高一下</option>
+                        <option value="高二上">高二上</option>
+                        <option value="高二下">高二下</option>
+                        <option value="高三上">高三上</option>
+                        <option value="高三下">高三下</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>选择班级 <span style="color:red;">*</span></label>
+                    <select id="importClass">
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>上传Excel文件</label>
+                    <input type="file" id="importFile" accept=".xlsx,.xls" style="padding: 8px 0;">
+                    <p class="import-hint">提示：Excel第一列第一行表头必须为"学科"，下面为学科名称</p>
+                    <button class="btn btn-secondary" style="margin-top:8px;" onclick="downloadSample()">下载导入样例</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('importModal')">取消</button>
+                <button class="btn btn-success" id="importBtn" onclick="importHomework()">导入</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentEditId = null;
+
+        document.getElementById('semesterSelect').addEventListener('change', loadHomework);
+        document.getElementById('classSelect').addEventListener('change', loadHomework);
+
+        function getClassId() {
+            return document.getElementById('classSelect').value || '';
+        }
+
+        function loadClasses() {
+            fetch('/api/classes')
+                .then(r => r.json())
+                .then(data => {
+                    const select = document.getElementById('classSelect');
+                    if (!data.success || !data.data || data.data.length === 0) {
+                        select.innerHTML = '<option value="">暂无班级</option>';
+                        return;
+                    }
+                    const sortedClasses = [...data.data].sort((a, b) => b.id - a.id);
+                    select.innerHTML = '<option value="">全部班级</option>' +
+                        sortedClasses.map(cls => `<option value="${cls.id}">${cls.name}</option>`).join('');
+                    select.value = sortedClasses[0].id;
+                    loadHomework();
+                })
+                .catch(err => {
+                    console.error('加载班级列表失败', err);
+                });
+        }
+
+        function loadHomework() {
+            const semester = document.getElementById('semesterSelect').value;
+            const classId = getClassId();
+            let url = '/api/homework?';
+            const params = [];
+            if (semester) params.push('semester=' + encodeURIComponent(semester));
+            if (classId) params.push('class_id=' + encodeURIComponent(classId));
+            url += params.join('&');
+
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        renderTable(data.data);
+                    } else {
+                        showToast('加载失败: ' + data.message, 'error');
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    showToast('加载失败', 'error');
+                });
+        }
+
+        function renderTable(rows) {
+            const tbody = document.getElementById('homeworkTableBody');
+            if (!rows || rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">暂无数据</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map(row => `
+                <tr>
+                    <td>${row.semester}</td>
+                    <td>${row.subject}</td>
+                    <td>${row.content || '-'}</td>
+                    <td class="action-btns">
+                        <button class="btn btn-secondary" onclick="editHomework(${row.id}, '${row.semester}', '${row.subject}', '${(row.content || '').replace(/'/g, "\\'")}')">编辑</button>
+                        <button class="btn btn-danger" onclick="deleteHomework(${row.id})">删除</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function openAddModal() {
+            currentEditId = null;
+            document.getElementById('modalTitle').textContent = '添加学科';
+            document.getElementById('modalSemester').value = document.getElementById('semesterSelect').value || '高一上';
+            document.getElementById('modalSubject').value = '';
+            document.getElementById('modalContent').value = '';
+            document.getElementById('addModal').style.display = 'flex';
+        }
+
+        function editHomework(id, semester, subject, content) {
+            currentEditId = id;
+            document.getElementById('modalTitle').textContent = '编辑学科';
+            document.getElementById('modalSemester').value = semester;
+            document.getElementById('modalSubject').value = subject;
+            document.getElementById('modalContent').value = content;
+            document.getElementById('addModal').style.display = 'flex';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function saveHomework() {
+            const semester = document.getElementById('modalSemester').value;
+            const subject = document.getElementById('modalSubject').value.trim();
+            const content = document.getElementById('modalContent').value.trim();
+            const classId = getClassId();
+
+            if (!subject) {
+                showToast('请输入学科名称', 'error');
+                return;
+            }
+
+            fetch('/api/homework/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ semester, subject, content, class_id: classId || null })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('保存成功', 'success');
+                    closeModal('addModal');
+                    loadHomework();
+                } else {
+                    showToast('保存失败: ' + data.message, 'error');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                showToast('保存失败', 'error');
+            });
+        }
+
+        function deleteHomework(id) {
+            if (!confirm('确定要删除这条记录吗？')) return;
+            fetch('/api/homework/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('删除成功', 'success');
+                    loadHomework();
+                } else {
+                    showToast('删除失败: ' + data.message, 'error');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                showToast('删除失败', 'error');
+            });
+        }
+
+        function downloadSample() {
+            window.open('/api/homework/sample', '_blank');
+        }
+
+        function openImportModal() {
+            const selectedSemester = document.getElementById('semesterSelect').value;
+            document.getElementById('importSemester').value = selectedSemester || '高一上';
+            const classSelect = document.getElementById('classSelect');
+            const importClass = document.getElementById('importClass');
+            importClass.innerHTML = Array.from(classSelect.options).filter(o => o.value).map(o => `<option value="${o.value}">${o.textContent}</option>`).join('');
+            importClass.value = classSelect.value;
+            document.getElementById('importFile').value = '';
+            document.getElementById('importModal').style.display = 'flex';
+        }
+
+        function importHomework() {
+            const semester = document.getElementById('importSemester').value;
+            const classId = document.getElementById('importClass').value;
+            const fileInput = document.getElementById('importFile');
+            const file = fileInput.files[0];
+
+            if (!classId) {
+                showToast('请选择班级', 'error');
+                return;
+            }
+
+            if (!file) {
+                showToast('请选择Excel文件', 'error');
+                return;
+            }
+
+            const validTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
+            if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
+                showToast('请上传Excel文件(.xlsx或.xls)', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('importBtn');
+            btn.disabled = true;
+            btn.textContent = '导入中...';
+
+            const formData = new FormData();
+            formData.append('semester', semester);
+            formData.append('class_id', classId);
+            formData.append('file', file);
+
+            fetch('/api/homework/import', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.textContent = '导入';
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    closeModal('importModal');
+                    loadHomework();
+                } else {
+                    showToast('导入失败: ' + data.message, 'error');
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                btn.disabled = false;
+                btn.textContent = '导入';
+                showToast('导入失败', 'error');
+            });
+        }
+
+        function showToast(message, type) {
+            const toast = document.createElement('div');
+            toast.className = 'toast toast-' + type;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        loadClasses();
+    </script>
+</body>
+</html>

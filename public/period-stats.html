@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>周期统计 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+    
+    <style>
+        .user-info.show { opacity:1; }
+    </style>
+    <style>
+        .ps-header {
+            background: linear-gradient(135deg, #6366F1, #8B5CF6);
+            color: white;
+            padding: 30px;
+            border-radius: 16px;
+            margin-bottom: 24px;
+        }
+        .ps-header h1 { font-size: 1.8rem; margin-bottom: 20px; }
+        .ps-controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .ps-controls label {
+            font-size: 0.95rem;
+            opacity: 0.9;
+        }
+        .ps-controls input[type="month"] {
+            padding: 10px 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .ps-controls input[type="month"]:focus {
+            border-color: white;
+            outline: none;
+        }
+        .ps-controls input[type="month"]::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+            cursor: pointer;
+        }
+        .ps-info {
+            display: flex;
+            gap: 20px;
+            background: rgba(255,255,255,0.15);
+            padding: 12px 24px;
+            border-radius: 10px;
+        }
+        .ps-info-item { display: flex; flex-direction: column; }
+        .ps-info-label { font-size: 0.85rem; opacity: 0.8; }
+        .ps-info-value { font-size: 1.1rem; font-weight: 600; }
+        .stats-cards {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: var(--shadow);
+            text-align: center;
+        }
+        .stat-card-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .stat-card-label {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+        .stat-card.present .stat-card-value { color: #059669; }
+        .stat-card.late .stat-card-value { color: #D97706; }
+        .stat-card.absent .stat-card-value { color: #DC2626; }
+        .stat-card.leave .stat-card-value { color: #6366F1; }
+        .stat-card.homework-missing .stat-card-value { color: #DC2626; }
+        .records-section {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: var(--shadow);
+            min-height: 200px;
+        }
+        .records-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .day-record {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+        }
+        .day-record-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .day-date {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .day-weekday {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .event-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .event-tag {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .event-tag.beauty-positive {
+            background: #D1FAE5;
+            color: #065F46;
+        }
+        .event-tag.beauty-negative {
+            background: #FEE2E2;
+            color: #991B1B;
+        }
+        .event-tag.attendance-present {
+            background: #D1FAE5;
+            color: #065F46;
+        }
+        .event-tag.attendance-late {
+            background: #FEF3C7;
+            color: #92400E;
+        }
+        .event-tag.attendance-absent {
+            background: #FEE2E2;
+            color: #991B1B;
+        }
+        .event-tag.attendance-leave {
+            background: #E0E7FF;
+            color: #3730A3;
+        }
+        .event-tag.homework-missing {
+            background: #FEE2E2;
+            color: #991B1B;
+        }
+        .no-records {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            padding: 60px 0;
+        }
+        @media (max-width: 768px) {
+            .stats-cards { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 480px) {
+            .stats-cards { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <script>
+    (function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/auth/check', false);
+        xhr.send();
+        if (xhr.status === 200) {
+            var data = JSON.parse(xhr.responseText);
+            if (data.loggedIn && data.user.role === 'student') {
+                var s = document.createElement('style');
+                s.textContent = '#navDataManage,#navMeiliXuefen,#navAttendance,#navHomework{display:none!important}';
+                document.head.appendChild(s);
+            }
+        }
+    })();
+    </script>
+    <div class="main-layout">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                <span>成绩分析</span>
+            </div>
+            <nav class="nav-menu">
+                <a href="/dashboard" class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                    成绩分析
+                </a>
+                <a href="/detail-analysis" class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1-5-5-7-7 2-2 2-6 7-6-6 3-5 10 0 13z"/><path d="M21 12c0 4.97-4.03 9-9 9-2.39 0-4.57-.94-6.18-2.47 2.86 1.43 6.86 1.78 9.18-1.53 2.61-3.73 1.27-8.47 0-10 2.7 1.53 6 4.04 6 9z"/></svg>
+                    详细汇总
+                </a>
+                <a href="/period-stats" class="nav-item active">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
+                    周期统计
+                </a>
+                <div class="nav-group" id="navMeiliXuefen">
+                    <div class="nav-parent" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        美丽学分
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub">
+                        <li><a href="/events" class="nav-item">事件</a></li>
+                        <li><a href="/total-table" class="nav-item">总表</a></li>
+                    </ul>
+                </div>
+                <a href="/attendance" class="nav-item" id="navAttendance">
+                    <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                    考勤表
+                </a>
+                <div class="nav-group" id="navHomework">
+                    <div class="nav-parent" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        作业管理
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub">
+                        <li><a href="/homework-data" class="nav-item">数据</a></li>
+                        <li><a href="/homework-manage" class="nav-item">管理</a></li>
+                    </ul>
+                </div>
+                <a href="/teacher-admin" class="nav-item" id="navDataManage">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    数据管理
+                </a>
+            </nav>
+            
+            <script>
+        (function restoreSidebarUser(){const avatar=localStorage.getItem('sidebarUserAvatar');const name=localStorage.getItem('sidebarUserName');const avEl=document.getElementById('userAvatar');const nmEl=document.getElementById('userName');if(avatar&&avEl)avEl.textContent=avatar;if(name&&nmEl)nmEl.textContent=name;})();
+    </script>
+            <div class="sidebar-footer">
+                <div class="user-info" style="cursor:pointer;" onclick="openPasswordModal()">
+                    <div class="user-avatar" id="userAvatar"></div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName"></div>
+                        <div style="font-size:0.7rem;color:#94a3b8;">点击修改密码</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" style="margin-top: 15px; width: 100%;">退出登录</button>
+            </div>
+        </aside>
+
+        <div class="modal-overlay" id="passwordModal" style="display:none;">
+            <div class="modal" style="max-width:360px;">
+                <div class="modal-header">
+                    <h2 class="modal-title">修改密码</h2>
+                    <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+                </div>
+                <div class="modal-form" style="padding:20px;">
+                    <div class="form-group"><label>当前密码</label><input type="password" id="oldPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入当前密码"></div>
+                    <div class="form-group" style="margin-top:12px;"><label>新密码</label><input type="password" id="newPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入新密码（至少4位）"></div>
+                    <div class="form-group" style="margin-top:12px;"><label>确认新密码</label><input type="password" id="confirmPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="再次输入新密码"></div>
+                    <div id="passwordError" style="color:#DC2626;font-size:0.85rem;margin-top:8px;display:none;"></div>
+                    <div class="modal-actions" style="margin-top:16px;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('passwordModal')">取消</button>
+                        <button type="button" class="btn btn-primary" onclick="changePassword()">确认修改</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <main class="main-content">
+            <div class="ps-header">
+                <h1>周期统计</h1>
+                <div class="ps-controls">
+                    <label>时间范围：</label>
+                    <input type="month" id="startMonth" title="起始月份">
+                    <span style="font-size:1.2rem;">→</span>
+                    <input type="month" id="endMonth" title="结束月份">
+                    <button onclick="loadStats()" style="padding:10px 24px;background:rgba(255,255,255,0.2);color:white;border:2px solid rgba(255,255,255,0.4);border-radius:10px;cursor:pointer;font-size:1rem;">查询</button>
+                </div>
+                <div class="ps-info" style="margin-top:16px;">
+                    <div class="ps-info-item">
+                        <span class="ps-info-label">学生</span>
+                        <span class="ps-info-value" id="studentName">-</span>
+                    </div>
+                    <div class="ps-info-item">
+                        <span class="ps-info-label">学号</span>
+                        <span class="ps-info-value" id="studentId">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-cards">
+                <div class="stat-card present">
+                    <div class="stat-card-value" id="statNormal">0</div>
+                    <div class="stat-card-label">正常出勤（次）</div>
+                </div>
+                <div class="stat-card late">
+                    <div class="stat-card-value" id="statLate">0</div>
+                    <div class="stat-card-label">总共迟到（分钟）</div>
+                </div>
+                <div class="stat-card absent">
+                    <div class="stat-card-value" id="statAbsent">0</div>
+                    <div class="stat-card-label">总共旷课（分钟）</div>
+                </div>
+                <div class="stat-card leave">
+                    <div class="stat-card-value" id="statLeave">0</div>
+                    <div class="stat-card-label">请假（次）</div>
+                </div>
+                <div class="stat-card homework-missing">
+                    <div class="stat-card-value" id="statHomeworkMissing">0</div>
+                    <div class="stat-card-label">缺交作业（次）</div>
+                </div>
+            </div>
+
+            <div class="records-section">
+                <h2 class="records-title">详细记录</h2>
+                <div id="recordsContainer"><div class="no-records">加载中...</div></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/collab.js"></script>
+    <script>
+        function toggleSubMenu(el) {
+            el.classList.toggle('expanded');
+            var sub = el.nextElementSibling;
+            if (sub) sub.classList.toggle('expanded');
+        }
+        function openPasswordModal() {
+            document.getElementById('oldPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+            document.getElementById('passwordError').style.display = 'none';
+            document.getElementById('passwordModal').style.display = 'flex';
+        }
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+        async function changePassword() {
+            var o = document.getElementById('oldPassword').value;
+            var n = document.getElementById('newPassword').value;
+            var c = document.getElementById('confirmPassword').value;
+            var e = document.getElementById('passwordError');
+            if (!o || !n || !c) { e.textContent = '请填写所有字段'; e.style.display = 'block'; return; }
+            if (n !== c) { e.textContent = '两次新密码不一致'; e.style.display = 'block'; return; }
+            if (n.length < 4) { e.textContent = '新密码至少4位'; e.style.display = 'block'; return; }
+            try {
+                var res = await fetch('/api/auth/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ oldPassword: o, newPassword: n })
+                });
+                var data = await res.json();
+                if (data.success) {
+                    alert('密码修改成功');
+                    closeModal('passwordModal');
+                } else {
+                    e.textContent = data.message || '修改失败';
+                    e.style.display = 'block';
+                }
+            } catch (err) {
+                e.textContent = '网络错误';
+                e.style.display = 'block';
+            }
+        }
+        function logout() {
+            fetch('/api/logout', { method: 'POST' }).then(function() {
+                window.location.href = '/login';
+            });
+        }
+
+        async function checkAuth() {
+            try {
+                var res = await fetch('/api/auth/check');
+                var data = await res.json();
+                if (!data.loggedIn) { window.location.href = '/login'; return null; }
+                var userRole = data.user.role || 'student';
+                var roleMap = { admin: '系统管理员', teacher: '班主任', student: '学生', class: '班级' };
+                document.getElementById('userAvatar').textContent = data.user.name.charAt(0);
+                document.getElementById('userName').textContent = data.user.name + ' ' + (roleMap[userRole] || '');
+                localStorage.setItem('sidebarUserAvatar', data.user.name.charAt(0));
+                localStorage.setItem('sidebarUserName', data.user.name + ' ' + (roleMap[userRole] || ''));
+                if (userRole !== 'student') { window.location.href = '/dashboard'; return null; }
+                return data.user;
+            } catch (e) { window.location.href = '/login'; return null; }
+        }
+
+        var WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+
+        function getWeekday(dateStr) {
+            var d = new Date(dateStr);
+            return '周' + WEEKDAY_NAMES[d.getDay()];
+        }
+
+        function formatDate(dateStr) {
+            var parts = dateStr.split('-');
+            return parts[0] + '年' + parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
+        }
+
+        function initMonthInputs() {
+            var now = new Date();
+            var ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            document.getElementById('startMonth').value = ym;
+            document.getElementById('endMonth').value = ym;
+        }
+
+        async function loadStats() {
+            var startMonth = document.getElementById('startMonth').value;
+            var endMonth = document.getElementById('endMonth').value;
+
+            if (!startMonth || !endMonth) {
+                alert('请选择时间范围');
+                return;
+            }
+
+            if (startMonth > endMonth) {
+                alert('起始月份不能晚于结束月份');
+                return;
+            }
+
+            try {
+                var res = await fetch('/api/student/period-stats?start_month=' + startMonth + '&end_month=' + endMonth);
+                var result = await res.json();
+
+                if (!result.success) {
+                    document.getElementById('recordsContainer').innerHTML = '<div class="no-records">该时间段内暂无记录</div>';
+                    alert(result.message || '获取数据失败');
+                    return;
+                }
+
+                var data = result.data;
+                document.getElementById('studentName').textContent = data.student_name;
+                document.getElementById('studentId').textContent = data.student_id;
+
+                var stats = data.stats;
+                document.getElementById('statNormal').textContent = stats.normal_count;
+                document.getElementById('statLate').textContent = stats.total_late_minutes;
+                document.getElementById('statAbsent').textContent = stats.total_absent_minutes;
+                document.getElementById('statLeave').textContent = stats.leave_count;
+                document.getElementById('statHomeworkMissing').textContent = stats.homework_missing_count || 0;
+
+                renderRecords(data.daily_records);
+            } catch (err) {
+                document.getElementById('recordsContainer').innerHTML = '<div class="no-records">该时间段内暂无记录</div>';
+                console.error('加载周期统计失败:', err);
+            }
+        }
+
+        function renderRecords(dailyRecords) {
+            var container = document.getElementById('recordsContainer');
+
+            if (!dailyRecords || dailyRecords.length === 0) {
+                container.innerHTML = '<div class="no-records">该时间段内暂无记录</div>';
+                return;
+            }
+
+            var html = '';
+            dailyRecords.forEach(function(day) {
+                var hasContent = false;
+                var dayHtml = '<div class="day-record">';
+                dayHtml += '<div class="day-record-header">';
+                dayHtml += '<span class="day-date">' + formatDate(day.date) + '</span>';
+                dayHtml += '<span class="day-weekday">' + getWeekday(day.date) + '</span>';
+                dayHtml += '</div>';
+                dayHtml += '<div class="event-tags">';
+
+                day.attendance.forEach(function(a) {
+                    if (a.status === 'late') {
+                        dayHtml += '<span class="event-tag attendance-late">迟到 ' + (a.late_time || '0') + ' 分钟</span>';
+                        hasContent = true;
+                    } else if (a.status === 'absent') {
+                        dayHtml += '<span class="event-tag attendance-absent">旷课 ' + (a.absent_time || '0') + ' 分钟</span>';
+                        hasContent = true;
+                    } else if (a.status === 'leave') {
+                        var leaveText = '请假';
+                        if (a.leave_type) leaveText += '（' + a.leave_type + '）';
+                        if (a.leave_duration) leaveText += ' ' + a.leave_duration;
+                        dayHtml += '<span class="event-tag attendance-leave">' + leaveText + '</span>';
+                        hasContent = true;
+                    }
+                });
+
+                day.beauty.forEach(function(b) {
+                    var score = parseFloat(b.score) || 0;
+                    var cls = score >= 0 ? 'beauty-positive' : 'beauty-negative';
+                    var prefix = score >= 0 ? '+' : '';
+                    dayHtml += '<span class="event-tag ' + cls + '">' + (b.event_name || '美丽学分') + ' ' + prefix + score + '分</span>';
+                    hasContent = true;
+                });
+
+                day.homework && day.homework.forEach(function(h) {
+                    dayHtml += '<span class="event-tag homework-missing">缺交：' + (h.subject || '未知科目') + '</span>';
+                    hasContent = true;
+                });
+
+                dayHtml += '</div>';
+                dayHtml += '</div>';
+
+                if (hasContent) {
+                    html += dayHtml;
+                }
+            });
+
+            if (!html) {
+                container.innerHTML = '<div class="no-records">该时间段内暂无记录</div>';
+            } else {
+                container.innerHTML = html;
+            }
+        }
+
+        initMonthInputs();
+        checkAuth().then(function() { loadStats(); });
+        if (window.Collab) Collab.connect();
+    </script>
+</body>
+</html>

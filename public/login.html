@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>成绩分析系统 - 登录</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #020617;
+            min-height: 100vh;
+            overflow-x: hidden;
+            font-family: 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #fff;
+        }
+
+        .universe-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            background: 
+                radial-gradient(ellipse at 20% 50%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.06) 0%, transparent 40%),
+                radial-gradient(ellipse at 60% 80%, rgba(14, 165, 233, 0.05) 0%, transparent 45%);
+        }
+
+        .starfield {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .grid-matrix {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 200%;
+            height: 200%;
+            z-index: 2;
+            opacity: 0.15;
+            background-image: 
+                linear-gradient(rgba(56, 189, 248, 0.4) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(56, 189, 248, 0.4) 1px, transparent 1px);
+            background-size: 80px 80px;
+            transform: perspective(500px) rotateX(75deg) translateY(-70%) translateZ(-100px);
+            animation: gridScroll 25s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes gridScroll {
+            0% { transform: perspective(500px) rotateX(75deg) translateY(-70%) translateZ(-100px) translateY(0); }
+            100% { transform: perspective(500px) rotateX(75deg) translateY(-70%) translateZ(-100px) translateY(80px); }
+        }
+
+        .hex-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            opacity: 0.03;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%2306b6d4' fill-opacity='1'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            animation: hexFloat 30s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        @keyframes hexFloat {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(1deg); }
+        }
+
+        .scan-beam {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(34, 211, 238, 0.3) 20%, 
+                rgba(34, 211, 238, 0.8) 50%, 
+                rgba(34, 211, 238, 0.3) 80%, 
+                transparent 100%);
+            z-index: 3;
+            box-shadow: 
+                0 0 30px rgba(34, 211, 238, 0.5),
+                0 0 60px rgba(34, 211, 238, 0.3),
+                0 0 90px rgba(34, 211, 238, 0.1);
+            animation: beamScan 4s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        @keyframes beamScan {
+            0% { top: -3px; opacity: 0; }
+            5% { opacity: 1; }
+            95% { opacity: 1; }
+            100% { top: 100vh; opacity: 0; }
+        }
+
+        .main-stage {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+            perspective: 1500px;
+        }
+
+        .holo-platform {
+            display: flex;
+            gap: 120px;
+            max-width: 1400px;
+            width: 100%;
+            align-items: center;
+            transform-style: preserve-3d;
+        }
+
+        .login-module {
+            flex: 0 0 460px;
+            position: relative;
+            transform-style: preserve-3d;
+        }
+
+        .cyber-card {
+            position: relative;
+            background: linear-gradient(135deg, 
+                rgba(15, 23, 42, 0.85) 0%, 
+                rgba(2, 6, 23, 0.92) 100%);
+            border-radius: 20px;
+            padding: 52px 44px;
+            backdrop-filter: blur(30px);
+            border: 1px solid rgba(56, 189, 248, 0.15);
+            box-shadow: 
+                0 0 0 1px rgba(56, 189, 248, 0.05),
+                0 25px 50px -12px rgba(0, 0, 0, 0.6),
+                0 0 100px rgba(56, 189, 248, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .cyber-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, 
+                transparent, 
+                rgba(34, 211, 238, 0.6), 
+                rgba(168, 85, 247, 0.6), 
+                transparent);
+            animation: topGlow 4s ease-in-out infinite;
+        }
+
+        @keyframes topGlow {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
+
+        .cyber-card::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: conic-gradient(
+                from 0deg,
+                transparent,
+                rgba(56, 189, 248, 0.03),
+                transparent,
+                rgba(168, 85, 247, 0.03),
+                transparent
+            );
+            animation: cardRotate 15s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes cardRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .frame-corner {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border-color: rgba(34, 211, 238, 0.7);
+            border-style: solid;
+            z-index: 5;
+        }
+
+        .frame-corner::before {
+            content: '';
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: #22d3ee;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #22d3ee;
+        }
+
+        .frame-corner.tl { top: 12px; left: 12px; border-width: 2px 0 0 2px; }
+        .frame-corner.tl::before { top: -3px; left: -3px; }
+        
+        .frame-corner.tr { top: 12px; right: 12px; border-width: 2px 2px 0 0; }
+        .frame-corner.tr::before { top: -3px; right: -3px; }
+        
+        .frame-corner.bl { bottom: 12px; left: 12px; border-width: 0 0 2px 2px; }
+        .frame-corner.bl::before { bottom: -3px; left: -3px; }
+        
+        .frame-corner.br { bottom: 12px; right: 12px; border-width: 0 2px 2px 0; }
+        .frame-corner.br::before { bottom: -3px; right: -3px; }
+
+        .brand-zone {
+            text-align: center;
+            margin-bottom: 40px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .logo-core {
+            width: 90px;
+            height: 90px;
+            margin: 0 auto 28px;
+            position: relative;
+        }
+
+        .orbit-system {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 1px solid rgba(34, 211, 238, 0.25);
+            border-radius: 50%;
+        }
+
+        .orbit-system:nth-child(1) {
+            width: 110px;
+            height: 110px;
+            animation: orbitSpin 6s linear infinite;
+        }
+
+        .orbit-system:nth-child(2) {
+            width: 135px;
+            height: 135px;
+            animation: orbitSpin 9s linear infinite reverse;
+        }
+
+        .orbit-system:nth-child(3) {
+            width: 160px;
+            height: 160px;
+            animation: orbitSpin 12s linear infinite;
+        }
+
+        .orbit-dot {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #22d3ee;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #22d3ee;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        @keyframes orbitSpin {
+            from { transform: translate(-50%, -50%) rotate(0deg); }
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        .core-icon {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 0 20px rgba(34, 211, 238, 0.7));
+            animation: corePulse 3s ease-in-out infinite;
+        }
+
+        @keyframes corePulse {
+            0%, 100% { 
+                filter: drop-shadow(0 0 20px rgba(34, 211, 238, 0.7));
+                transform: scale(1);
+            }
+            50% { 
+                filter: drop-shadow(0 0 35px rgba(34, 211, 238, 1));
+                transform: scale(1.05);
+            }
+        }
+
+        .system-name {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            color: #f1f5f9;
+            margin-bottom: 8px;
+            text-shadow: 0 0 30px rgba(34, 211, 238, 0.5);
+            position: relative;
+            display: inline-block;
+        }
+
+        .system-name::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #22d3ee, transparent);
+        }
+
+        .system-tagline {
+            font-size: 13px;
+            letter-spacing: 4px;
+            color: rgba(148, 163, 184, 0.7);
+            font-weight: 300;
+        }
+
+        .input-cluster {
+            margin-bottom: 26px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .input-field {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-field input {
+            width: 100%;
+            padding: 16px 18px 16px 52px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(71, 85, 105, 0.3);
+            border-radius: 12px;
+            color: #e2e8f0;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            outline: none;
+        }
+
+        .input-field input::placeholder {
+            color: rgba(148, 163, 184, 0.4);
+            letter-spacing: 1px;
+        }
+
+        .input-field input:focus {
+            border-color: rgba(34, 211, 238, 0.5);
+            background: rgba(15, 23, 42, 0.9);
+            box-shadow: 
+                0 0 0 3px rgba(34, 211, 238, 0.08),
+                0 0 25px rgba(34, 211, 238, 0.15),
+                inset 0 0 15px rgba(34, 211, 238, 0.03);
+        }
+
+        .field-icon {
+            position: absolute;
+            left: 18px;
+            width: 22px;
+            height: 22px;
+            fill: rgba(148, 163, 184, 0.5);
+            transition: all 0.35s ease;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .input-field input:focus ~ .field-icon {
+            fill: #22d3ee;
+            filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.8));
+        }
+
+        #captchaGroup {
+            display: none;
+        }
+
+        #captchaGroup .input-field {
+            flex: 1;
+        }
+
+        #captchaImage {
+            height: 50px;
+            border-radius: 10px;
+            cursor: pointer;
+            border: 1px solid rgba(71, 85, 105, 0.3);
+            transition: all 0.3s ease;
+            background: rgba(15, 23, 42, 0.7);
+        }
+
+        #captchaImage:hover {
+            border-color: rgba(34, 211, 238, 0.5);
+            box-shadow: 0 0 20px rgba(34, 211, 238, 0.2);
+        }
+
+        .alert-box {
+            color: #f87171;
+            font-size: 13px;
+            padding: 12px 16px;
+            background: rgba(248, 113, 113, 0.08);
+            border: 1px solid rgba(248, 113, 113, 0.25);
+            border-radius: 10px;
+            margin-bottom: 24px;
+            opacity: 0;
+            transform: translateY(-8px) scale(0.98);
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            z-index: 2;
+        }
+
+        .alert-box.visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .auth-button {
+            width: 100%;
+            padding: 17px;
+            background: linear-gradient(135deg, 
+                rgba(14, 165, 233, 0.85) 0%, 
+                rgba(37, 99, 235, 0.9) 50%,
+                rgba(124, 58, 237, 0.85) 100%);
+            border: 1px solid rgba(34, 211, 238, 0.3);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: 4px;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            z-index: 2;
+        }
+
+        .auth-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, 
+                transparent, 
+                rgba(255, 255, 255, 0.25), 
+                transparent);
+            transition: left 0.6s ease;
+        }
+
+        .auth-button:hover {
+            background: linear-gradient(135deg, 
+                rgba(34, 211, 238, 0.95) 0%, 
+                rgba(59, 130, 246, 1) 50%,
+                rgba(147, 51, 234, 0.95) 100%);
+            box-shadow: 
+                0 0 40px rgba(34, 211, 238, 0.35),
+                0 0 80px rgba(34, 211, 238, 0.15),
+                inset 0 0 25px rgba(255, 255, 255, 0.1);
+            transform: translateY(-3px);
+            border-color: rgba(34, 211, 238, 0.5);
+        }
+
+        .auth-button:hover::before {
+            left: 100%;
+        }
+
+        .auth-button:active {
+            transform: translateY(-1px);
+        }
+
+        .auth-button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .visual-display {
+            flex: 1;
+            position: relative;
+            min-height: 600px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .planet-system {
+            position: relative;
+            width: 520px;
+            height: 520px;
+            transform-style: preserve-3d;
+        }
+
+        .earth-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 320px;
+            height: 320px;
+            perspective: 1000px;
+        }
+
+        .earth-sphere {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            position: relative;
+            transform-style: preserve-3d;
+            animation: earthRotate 20s linear infinite;
+        }
+
+        @keyframes earthRotate {
+            from { transform: rotateY(0deg) rotateX(10deg); }
+            to { transform: rotateY(360deg) rotateX(10deg); }
+        }
+
+        .earth-surface {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: 
+                radial-gradient(circle at 30% 30%, 
+                    rgba(56, 189, 248, 0.4) 0%, 
+                    rgba(37, 99, 235, 0.3) 30%, 
+                    rgba(29, 78, 216, 0.6) 60%, 
+                    rgba(30, 64, 175, 0.8) 100%);
+            box-shadow: 
+                inset -30px -30px 60px rgba(0, 0, 0, 0.4),
+                inset 10px 10px 40px rgba(56, 189, 248, 0.2),
+                0 0 60px rgba(56, 189, 248, 0.3),
+                0 0 100px rgba(37, 99, 235, 0.2);
+            overflow: hidden;
+        }
+
+        .continent {
+            position: absolute;
+            background: linear-gradient(135deg, 
+                rgba(34, 197, 94, 0.6) 0%, 
+                rgba(22, 163, 74, 0.5) 50%,
+                rgba(21, 128, 61, 0.4) 100%);
+            border-radius: 40% 60% 50% 40% / 50% 40% 60% 50%;
+            box-shadow: 
+                inset 2px 2px 8px rgba(74, 222, 128, 0.3),
+                0 0 15px rgba(34, 197, 94, 0.2);
+        }
+
+        .continent.north-america {
+            width: 80px;
+            height: 65px;
+            top: 18%;
+            left: 12%;
+            transform: rotate(-15deg);
+        }
+
+        .continent.south-america {
+            width: 45px;
+            height: 75px;
+            top: 48%;
+            left: 22%;
+            transform: rotate(15deg);
+        }
+
+        .continent.europe {
+            width: 55px;
+            height: 45px;
+            top: 20%;
+            left: 46%;
+            transform: rotate(-8deg);
+        }
+
+        .continent.africa {
+            width: 65px;
+            height: 85px;
+            top: 38%;
+            left: 48%;
+            transform: rotate(5deg);
+        }
+
+        .continent.asia {
+            width: 120px;
+            height: 75px;
+            top: 18%;
+            left: 58%;
+            transform: rotate(-5deg);
+        }
+
+        .continent.australia {
+            width: 45px;
+            height: 38px;
+            top: 62%;
+            left: 76%;
+            transform: rotate(-20deg);
+        }
+
+        .earth-grid {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background-image: 
+                repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(148, 163, 184, 0.08) 29px),
+                repeating-linear-gradient(90deg, transparent, transparent 28px, rgba(148, 163, 184, 0.08) 29px);
+            animation: gridRotate 30s linear infinite reverse;
+            mask-image: radial-gradient(circle, black 30%, transparent 70%);
+            -webkit-mask-image: radial-gradient(circle, black 30%, transparent 70%);
+        }
+
+        @keyframes gridRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .earth-glow {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, 
+                transparent 0%, 
+                transparent 50%, 
+                rgba(56, 189, 248, 0.1) 70%, 
+                rgba(34, 211, 238, 0.2) 85%,
+                transparent 100%);
+            animation: glowPulse 4s ease-in-out infinite;
+        }
+
+        @keyframes glowPulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+
+        .atmosphere-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            border: 1px solid;
+            animation: ringExpand 4s ease-in-out infinite;
+        }
+
+        .atmosphere-ring:nth-child(1) {
+            width: 370px;
+            height: 370px;
+            border-color: rgba(34, 211, 238, 0.2);
+            animation-delay: 0s;
+        }
+
+        .atmosphere-ring:nth-child(2) {
+            width: 420px;
+            height: 420px;
+            border-color: rgba(168, 85, 247, 0.15);
+            animation-delay: 0.6s;
+        }
+
+        .atmosphere-ring:nth-child(3) {
+            width: 480px;
+            height: 480px;
+            border-color: rgba(56, 189, 248, 0.12);
+            animation-delay: 1.2s;
+        }
+
+        .atmosphere-ring:nth-child(4) {
+            width: 540px;
+            height: 540px;
+            border-color: rgba(139, 92, 246, 0.08);
+            animation-delay: 1.8s;
+        }
+
+        @keyframes ringExpand {
+            0%, 100% { 
+                opacity: 0.3; 
+                transform: translate(-50%, -50%) scale(1); 
+            }
+            50% { 
+                opacity: 0.7; 
+                transform: translate(-50%, -50%) scale(1.02); 
+            }
+        }
+
+        .data-node {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #22d3ee;
+            border-radius: 50%;
+            box-shadow: 0 0 15px #22d3ee, 0 0 30px rgba(34, 211, 238, 0.5);
+            animation: nodePulse 2.5s ease-in-out infinite;
+        }
+
+        .data-node::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 24px;
+            height: 24px;
+            border: 1.5px solid rgba(34, 211, 238, 0.4);
+            border-radius: 50%;
+            animation: nodeRing 2.5s ease-in-out infinite;
+        }
+
+        .data-node::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 36px;
+            height: 36px;
+            border: 1px solid rgba(34, 211, 238, 0.2);
+            border-radius: 50%;
+            animation: nodeRing 2.5s ease-in-out infinite 0.3s;
+        }
+
+        @keyframes nodePulse {
+            0%, 100% { opacity: 0.7; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.4); }
+        }
+
+        @keyframes nodeRing {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
+            50% { transform: translate(-50%, -50%) scale(1.8); opacity: 0; }
+        }
+
+        .data-node:nth-of-type(6) { top: 18%; left: 22%; animation-delay: 0s; }
+        .data-node:nth-of-type(7) { top: 32%; right: 18%; animation-delay: 0.4s; }
+        .data-node:nth-of-type(8) { bottom: 28%; left: 28%; animation-delay: 0.8s; }
+        .data-node:nth-of-type(9) { bottom: 38%; right: 25%; animation-delay: 1.2s; }
+
+        .monitor-panel {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 10px;
+            padding: 14px 18px;
+            font-size: 11px;
+            color: rgba(148, 163, 184, 0.85);
+            backdrop-filter: blur(15px);
+            white-space: nowrap;
+            line-height: 1.7;
+            font-family: 'Microsoft YaHei', sans-serif;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .monitor-panel::before {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #22d3ee;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #22d3ee;
+            animation: indicatorBlink 1.8s ease-in-out infinite;
+        }
+
+        @keyframes indicatorBlink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.25; }
+        }
+
+        .monitor-panel.status-a {
+            top: 8%;
+            left: 2%;
+        }
+        .monitor-panel.status-a::before { top: -4px; left: -4px; }
+
+        .monitor-panel.status-b {
+            top: 12%;
+            right: -2%;
+        }
+        .monitor-panel.status-b::before { top: -4px; right: -4px; }
+
+        .monitor-panel.status-c {
+            bottom: 18%;
+            left: 5%;
+        }
+        .monitor-panel.status-c::before { bottom: -4px; left: -4px; }
+
+        .monitor-panel.status-d {
+            bottom: 12%;
+            right: 3%;
+        }
+        .monitor-panel.status-d::before { bottom: -4px; right: -4px; }
+
+        .panel-label {
+            color: #22d3ee;
+            font-weight: 600;
+            font-size: 11px;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .panel-value {
+            color: #f1f5f9;
+            font-weight: 600;
+        }
+
+        .stream-line {
+            position: absolute;
+            height: 1px;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(34, 211, 238, 0.5) 30%, 
+                rgba(168, 85, 247, 0.5) 70%, 
+                transparent 100%);
+            animation: streamFlow 3.5s ease-in-out infinite;
+        }
+
+        @keyframes streamFlow {
+            0%, 100% { opacity: 0.2; transform: scaleX(0.8); }
+            50% { opacity: 0.9; transform: scaleX(1); }
+        }
+
+        .wave-container {
+            position: absolute;
+            bottom: 8%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 280px;
+            height: 60px;
+            opacity: 0.4;
+        }
+
+        .floating-particle {
+            position: fixed;
+            width: 2px;
+            height: 2px;
+            background: rgba(34, 211, 238, 0.7);
+            border-radius: 50%;
+            pointer-events: none;
+            box-shadow: 0 0 6px rgba(34, 211, 238, 0.5);
+            animation: particleRise 10s linear infinite;
+        }
+
+        @keyframes particleRise {
+            0% { 
+                transform: translateY(100vh) translateX(0) scale(0);
+                opacity: 0;
+            }
+            10% { 
+                opacity: 1;
+                transform: translateY(90vh) translateX(10px) scale(1);
+            }
+            90% { 
+                opacity: 1;
+            }
+            100% { 
+                transform: translateY(-10vh) translateX(-10px) scale(0.5);
+                opacity: 0;
+            }
+        }
+
+        .corner-accent {
+            position: fixed;
+            width: 150px;
+            height: 150px;
+            pointer-events: none;
+            z-index: 4;
+        }
+
+        .corner-accent.tl {
+            top: 0;
+            left: 0;
+            border-top: 2px solid rgba(34, 211, 238, 0.2);
+            border-left: 2px solid rgba(34, 211, 238, 0.2);
+        }
+
+        .corner-accent.tr {
+            top: 0;
+            right: 0;
+            border-top: 2px solid rgba(168, 85, 247, 0.2);
+            border-right: 2px solid rgba(168, 85, 247, 0.2);
+        }
+
+        .corner-accent.bl {
+            bottom: 0;
+            left: 0;
+            border-bottom: 2px solid rgba(168, 85, 247, 0.2);
+            border-left: 2px solid rgba(168, 85, 247, 0.2);
+        }
+
+        .corner-accent.br {
+            bottom: 0;
+            right: 0;
+            border-bottom: 2px solid rgba(34, 211, 238, 0.2);
+            border-right: 2px solid rgba(34, 211, 238, 0.2);
+        }
+
+        @media (max-width: 1200px) {
+            .visual-display { display: none; }
+            .holo-platform { justify-content: center; }
+            .login-module { flex: 0 0 460px; }
+        }
+
+        @media (max-width: 520px) {
+            .cyber-card { padding: 40px 28px; }
+            .login-module { flex: 0 0 100%; }
+            .system-name { font-size: 19px; }
+        }
+    </style>
+    <script>
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            const kicked = params.get('kicked') === '1';
+            const frozen = params.get('frozen') === '1';
+            const timeout = params.get('timeout') === '1';
+            if (!kicked && !frozen && !timeout) return;
+
+            if (frozen) alert('账户异常，已被冻结。请与管理员联系。');
+            else if (timeout) alert('您已超过 15 分钟未操作，登录状态已失效。\n\n请重新登录。');
+            else alert('您的账号已在其他设备登录，您已被强制下线。\n\n请重新登录。');
+
+            fetch('/api/logout', { method: 'POST' }).catch(function () {});
+            if (window.history.replaceState) {
+                window.history.replaceState({}, document.title, window.location.href.split('?')[0]);
+            }
+        })();
+    </script>
+</head>
+<body>
+    <div class="universe-bg"></div>
+    <canvas class="starfield" id="starfield"></canvas>
+    <div class="grid-matrix"></div>
+    <div class="hex-grid"></div>
+    <div class="scan-beam"></div>
+
+    <div class="corner-accent tl"></div>
+    <div class="corner-accent tr"></div>
+    <div class="corner-accent bl"></div>
+    <div class="corner-accent br"></div>
+
+    <div class="main-stage">
+        <div class="holo-platform">
+            <div class="login-module">
+                <div class="cyber-card">
+                    <div class="frame-corner tl"></div>
+                    <div class="frame-corner tr"></div>
+                    <div class="frame-corner bl"></div>
+                    <div class="frame-corner br"></div>
+                    
+                    <div class="brand-zone">
+                        <div class="logo-core">
+                            <div class="orbit-system"><div class="orbit-dot"></div></div>
+                            <div class="orbit-system"><div class="orbit-dot"></div></div>
+                            <div class="orbit-system"><div class="orbit-dot"></div></div>
+                            <svg class="core-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="3.5" fill="none" stroke="#22d3ee" stroke-width="1.5"/>
+                                <ellipse cx="12" cy="12" rx="11" ry="4.5" fill="none" stroke="#22d3ee" stroke-width="0.8" opacity="0.6"/>
+                                <ellipse cx="12" cy="12" rx="11" ry="4.5" fill="none" stroke="#a855f7" stroke-width="0.8" opacity="0.5" transform="rotate(60 12 12)"/>
+                                <ellipse cx="12" cy="12" rx="11" ry="4.5" fill="none" stroke="#a855f7" stroke-width="0.8" opacity="0.5" transform="rotate(120 12 12)"/>
+                                <circle cx="12" cy="12" r="2" fill="#22d3ee"/>
+                                <circle cx="12" cy="12" r="1" fill="#fff"/>
+                            </svg>
+                        </div>
+                        <h1 class="system-name">欢迎进入 综合平台</h1>
+                        <p class="system-tagline">智能成绩分析系统</p>
+                    </div>
+                    
+                    <div id="errorMessage" class="alert-box"></div>
+                    
+                    <div class="input-cluster">
+                        <div class="input-field">
+                            <input type="text" id="employee_id" placeholder="请输入账号" autocomplete="username">
+                            <svg class="field-icon" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                        </div>
+                    </div>
+                
+                    <div class="input-cluster">
+                        <div class="input-field">
+                            <input type="password" id="password" placeholder="请输入密码" autocomplete="current-password">
+                            <svg class="field-icon" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                        </div>
+                    </div>
+                    
+                    <div class="input-cluster" id="captchaGroup">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <img id="captchaImage" src="" alt="验证码" title="点击刷新验证码">
+                            <div class="input-field" style="flex:1;">
+                                <input type="text" id="captcha" placeholder="请输入验证码" autocomplete="off" maxlength="4">
+                                <svg class="field-icon" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="button" id="loginBtn" class="auth-button">登 录</button>
+                </div>
+            </div>
+
+            <div class="visual-display">
+                <div class="planet-system">
+                    <div class="atmosphere-ring"></div>
+                    <div class="atmosphere-ring"></div>
+                    <div class="atmosphere-ring"></div>
+                    <div class="atmosphere-ring"></div>
+                    
+                    <div class="earth-container">
+                        <canvas id="earth3d" width="320" height="320"></canvas>
+                    </div>
+                    
+                    <div class="data-node"></div>
+                    <div class="data-node"></div>
+                    <div class="data-node"></div>
+                    <div class="data-node"></div>
+                    
+                    <div class="monitor-panel status-a">
+                        <div class="panel-label">系统状态</div>
+                        <div class="panel-value">● 运行正常</div><br>
+                        <div style="color:#4ade80;">在线率: 99.97%</div><br>
+                        <div>负载: 23.4%</div>
+                    </div>
+                    
+                    <div class="monitor-panel status-b">
+                        <div class="panel-label">网络状态</div>
+                        <div class="panel-value">节点数: 256</div><br>
+                        <div>延迟: 8ms</div><br>
+                        <div>带宽: 10 Gbps</div>
+                    </div>
+                    
+                    <div class="monitor-panel status-c">
+                        <div class="panel-label">安全防护</div>
+                        <div class="panel-value">加密方式: AES-256</div><br>
+                        <div style="color:#4ade80;">防火墙: 已启用</div><br>
+                        <div>协议版本: TLS 1.3</div>
+                    </div>
+                    
+                    <div class="monitor-panel status-d">
+                        <div class="panel-label">数据分析</div>
+                        <div class="panel-value">数据点: 120万</div><br>
+                        <div>查询量: 8.4K/s</div><br>
+                        <div>缓存命中率: 94.2%</div>
+                    </div>
+
+                    <div class="stream-line" style="top: 28%; left: 8%; width: 28%; transform: rotate(-18deg);"></div>
+                    <div class="stream-line" style="top: 55%; right: 6%; width: 32%; transform: rotate(22deg);"></div>
+                    <div class="stream-line" style="bottom: 22%; left: 15%; width: 24%; transform: rotate(-10deg);"></div>
+                    <div class="stream-line" style="bottom: 35%; right: 12%; width: 20%; transform: rotate(15deg);"></div>
+
+                    <canvas class="wave-container" id="waveCanvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const starCanvas = document.getElementById('starfield');
+        const starCtx = starCanvas.getContext('2d');
+
+        function resizeStarCanvas() {
+            starCanvas.width = window.innerWidth;
+            starCanvas.height = window.innerHeight;
+        }
+
+        resizeStarCanvas();
+        window.addEventListener('resize', resizeStarCanvas);
+
+        const stars = [];
+        const starCount = 180;
+
+        for (let i = 0; i < starCount; i++) {
+            stars.push({
+                x: Math.random() * starCanvas.width,
+                y: Math.random() * starCanvas.height,
+                size: Math.random() * 1.8 + 0.3,
+                speed: Math.random() * 0.3 + 0.05,
+                twinkleSpeed: Math.random() * 0.02 + 0.005,
+                twinklePhase: Math.random() * Math.PI * 2
+            });
+        }
+
+        let time = 0;
+
+        function renderStars() {
+            starCtx.clearRect(0, 0, starCanvas.width, starCanvas.height);
+
+            time += 0.016;
+
+            stars.forEach(star => {
+                star.y -= star.speed;
+                if (star.y < 0) {
+                    star.y = starCanvas.height;
+                    star.x = Math.random() * starCanvas.width;
+                }
+
+                const twinkle = Math.sin(time * star.twinkleSpeed * 60 + star.twinklePhase) * 0.4 + 0.6;
+                
+                starCtx.beginPath();
+                starCtx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                starCtx.fillStyle = `rgba(226, 232, 240, ${twinkle * 0.7})`;
+                starCtx.fill();
+
+                if (star.size > 1.2) {
+                    starCtx.beginPath();
+                    starCtx.arc(star.x, star.y, star.size * 2.5, 0, Math.PI * 2);
+                    starCtx.fillStyle = `rgba(226, 232, 240, ${twinkle * 0.1})`;
+                    starCtx.fill();
+                }
+            });
+
+            for (let i = 0; i < stars.length; i++) {
+                for (let j = i + 1; j < stars.length; j++) {
+                    const dx = stars[i].x - stars[j].x;
+                    const dy = stars[i].y - stars[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 100 && stars[i].size > 1 && stars[j].size > 1) {
+                        starCtx.beginPath();
+                        starCtx.moveTo(stars[i].x, stars[i].y);
+                        starCtx.lineTo(stars[j].x, stars[j].y);
+                        starCtx.strokeStyle = `rgba(148, 163, 184, ${0.08 * (1 - dist / 100)})`;
+                        starCtx.lineWidth = 0.5;
+                        starCtx.stroke();
+                    }
+                }
+            }
+
+            requestAnimationFrame(renderStars);
+        }
+
+        renderStars();
+
+        const waveCanvas = document.getElementById('waveCanvas');
+        const waveCtx = waveCanvas.getContext('2d');
+
+        function setupWaveCanvas() {
+            waveCanvas.width = 280;
+            waveCanvas.height = 60;
+        }
+
+        setupWaveCanvas();
+
+        let waveOffset = 0;
+
+        function drawWaveform() {
+            waveCtx.clearRect(0, 0, waveCanvas.width, waveCanvas.height);
+
+            const waves = [
+                { amplitude: 12, frequency: 0.025, speed: 0.04, color: 'rgba(34, 211, 238, 0.5)', offset: 0 },
+                { amplitude: 8, frequency: 0.035, speed: 0.06, color: 'rgba(168, 85, 247, 0.4)', offset: Math.PI / 3 },
+                { amplitude: 6, frequency: 0.05, speed: 0.08, color: 'rgba(56, 189, 248, 0.3)', offset: Math.PI / 1.5 }
+            ];
+
+            waves.forEach(wave => {
+                waveCtx.beginPath();
+                waveCtx.moveTo(0, waveCanvas.height / 2);
+
+                for (let x = 0; x <= waveCanvas.width; x++) {
+                    const y = waveCanvas.height / 2 + 
+                              Math.sin((x * wave.frequency) + (waveOffset * wave.speed) + wave.offset) * wave.amplitude +
+                              Math.sin((x * wave.frequency * 2.3) + (waveOffset * wave.speed * 1.5)) * (wave.amplitude * 0.3);
+                    waveCtx.lineTo(x, y);
+                }
+
+                waveCtx.strokeStyle = wave.color;
+                waveCtx.lineWidth = 1.5;
+                waveCtx.stroke();
+
+                waveCtx.lineTo(waveCanvas.width, waveCanvas.height);
+                waveCtx.lineTo(0, waveCanvas.height);
+                waveCtx.closePath();
+
+                const gradient = waveCtx.createLinearGradient(0, 0, 0, waveCanvas.height);
+                gradient.addColorStop(0, wave.color.replace('0.5)', '0.15)').replace('0.4)', '0.12)').replace('0.3)', '0.08)'));
+                gradient.addColorStop(1, 'transparent');
+                waveCtx.fillStyle = gradient;
+                waveCtx.fill();
+            });
+
+            waveOffset++;
+            requestAnimationFrame(drawWaveform);
+        }
+
+        drawWaveform();
+
+        for (let i = 0; i < 30; i++) {
+            const p = document.createElement('div');
+            p.className = 'floating-particle';
+            p.style.left = Math.random() * 100 + '%';
+            p.style.animationDelay = Math.random() * 10 + 's';
+            p.style.animationDuration = (Math.random() * 6 + 8) + 's';
+            document.body.appendChild(p);
+        }
+
+        const employeeIdInput = document.getElementById('employee_id');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('loginBtn');
+        const errorMessage = document.getElementById('errorMessage');
+        const captchaGroup = document.getElementById('captchaGroup');
+        const captchaImage = document.getElementById('captchaImage');
+        const captchaInput = document.getElementById('captcha');
+
+        let captchaToken = null;
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('visible');
+            setTimeout(() => errorMessage.classList.remove('visible'), 3500);
+        }
+
+        function showCaptcha(token, image) {
+            captchaToken = token;
+            captchaImage.src = image;
+            captchaGroup.style.display = 'block';
+            captchaInput.value = '';
+            captchaInput.focus();
+        }
+
+        function hideCaptcha() {
+            captchaGroup.style.display = 'none';
+            captchaToken = null;
+            captchaInput.value = '';
+        }
+
+        captchaImage.addEventListener('click', function() {
+            fetch('/api/captcha/generate')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        captchaToken = data.token;
+                        captchaImage.src = data.image;
+                    }
+                });
+        });
+
+        function login() {
+            var employee_id = employeeIdInput.value.trim();
+            var password = passwordInput.value;
+
+            if (!employee_id || !password) {
+                showError('请输入账号和密码');
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = '登录中...';
+
+            var body = { employee_id: employee_id, password: password };
+            if (captchaToken) {
+                body.captcha_token = captchaToken;
+                body.captcha_answer = captchaInput.value.trim();
+            }
+
+            fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    hideCaptcha();
+                    if (data.redirect) {
+                        window.location.href = data.redirect;
+                    } else {
+                        fetch('/api/auth/check')
+                            .then(r => r.json())
+                            .then(authData => {
+                                if (authData.user && authData.user.role === 'admin') {
+                                    window.location.href = '/admin';
+                                } else if (authData.user && authData.user.role === 'class') {
+                                    window.location.href = '/total-table';
+                                } else {
+                                    window.location.href = '/dashboard';
+                                }
+                            });
+                    }
+                } else if (data.needCaptcha) {
+                    showCaptcha(data.captchaToken, data.captchaImage);
+                    showError(data.message || '请输入验证码');
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = '登 录';
+                } else {
+                    showError(data.message || '登录失败');
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = '登 录';
+                }
+            })
+            .catch(err => {
+                showError('网络错误，请稍后重试');
+                loginBtn.disabled = false;
+                loginBtn.textContent = '登 录';
+            });
+        }
+
+        loginBtn.addEventListener('click', login);
+
+        passwordInput.addEventListener('keypress', e => {
+            if (e.key === 'Enter') login();
+        });
+
+        captchaInput.addEventListener('keypress', e => {
+            if (e.key === 'Enter') login();
+        });
+
+        employeeIdInput.focus();
+
+        (function() {
+            const canvas = document.getElementById('earth3d');
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = 140;
+            
+            let rotationY = 0;
+            const rotationSpeed = 0.008;
+            
+            function toRadians(degrees) {
+                return degrees * Math.PI / 180;
+            }
+            
+            function project3D(x, y, z, rotY, tiltX) {
+                const cosY = Math.cos(rotY);
+                const sinY = Math.sin(rotY);
+                const cosX = Math.cos(tiltX);
+                const sinX = Math.sin(tiltX);
+                
+                const x1 = x * cosY - z * sinY;
+                const z1 = x * sinY + z * cosY;
+                const y1 = y * cosX - z1 * sinX;
+                const z2 = y * sinX + z1 * cosX;
+                
+                const scale = 400 / (400 + z2);
+                
+                return {
+                    x: centerX + x1 * scale,
+                    y: centerY + y1 * scale,
+                    z: z2,
+                    visible: z2 > -radius
+                };
+            }
+            
+            const continents = [
+                { name: 'north-america', points: [
+                    [-100, 55], [-95, 60], [-85, 62], [-75, 58], [-65, 48],
+                    [-55, 48], [-60, 42], [-68, 35], [-80, 28], [-90, 22],
+                    [-98, 20], [-105, 25], [-115, 32], [-125, 40], [-125, 50],
+                    [-120, 55], [-110, 58], [-100, 55]
+                ]},
+                { name: 'south-america', points: [
+                    [-78, 10], [-70, 12], [-60, 8], [-52, 0], [-45, -5],
+                    [-38, -15], [-45, -25], [-52, -33], [-58, -40], [-68, -53],
+                    [-72, -50], [-75, -40], [-75, -25], [-78, -15], [-80, -5],
+                    [-78, 10]
+                ]},
+                { name: 'europe', points: [
+                    [-10, 36], [0, 38], [5, 43], [10, 45], [14, 48],
+                    [20, 50], [25, 52], [30, 54], [28, 56], [24, 58],
+                    [18, 60], [10, 62], [4, 60], [-5, 55], [-10, 50],
+                    [-8, 44], [-10, 36]
+                ]},
+                { name: 'africa', points: [
+                    [-17, 15], [-10, 18], [0, 15], [10, 12], [15, 8],
+                    [20, 5], [25, 0], [28, -5], [30, -15], [28, -25],
+                    [25, -34], [18, -35], [12, -32], [8, -25], [5, -15],
+                    [3, -5], [-5, 5], [-10, 10], [-17, 15]
+                ]},
+                { name: 'asia', points: [
+                    [30, 42], [40, 45], [50, 48], [60, 52], [70, 55],
+                    [80, 55], [90, 52], [100, 48], [108, 42], [112, 35],
+                    [110, 28], [105, 22], [98, 18], [92, 15], [85, 12],
+                    [78, 10], [70, 15], [60, 20], [50, 25], [42, 28],
+                    [35, 32], [30, 38], [30, 42]
+                ]},
+                { name: 'australia', points: [
+                    [113, -12], [118, -14], [128, -15], [138, -15], [145, -13],
+                    [150, -18], [148, -25], [142, -32], [135, -37], [130, -35],
+                    [122, -33], [116, -30], [114, -25], [113, -18], [113, -12]
+                ]}
+            ];
+            
+            function latLonToXYZ(lat, lon) {
+                const latRad = toRadians(lat);
+                const lonRad = toRadians(lon);
+                const r = radius * 0.97;
+                
+                return {
+                    x: r * Math.cos(latRad) * Math.sin(lonRad),
+                    y: r * Math.sin(latRad),
+                    z: r * Math.cos(latRad) * Math.cos(lonRad)
+                };
+            }
+            
+            function drawSphere() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                const gradient = ctx.createRadialGradient(
+                    centerX - radius * 0.3,
+                    centerY - radius * 0.3,
+                    0,
+                    centerX,
+                    centerY,
+                    radius
+                );
+                gradient.addColorStop(0, '#60a5fa');
+                gradient.addColorStop(0.3, '#3b82f6');
+                gradient.addColorStop(0.7, '#2563eb');
+                gradient.addColorStop(1, '#1e40af');
+                
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.clip();
+                
+                ctx.globalAlpha = 0.08;
+                for (let i = 0; i < 360; i += 15) {
+                    ctx.beginPath();
+                    for (let j = -90; j <= 90; j += 3) {
+                        const point = latLonToXYZ(j, i);
+                        const projected = project3D(point.x, point.y, point.z, rotationY, toRadians(10));
+                        if (j === -90) {
+                            ctx.moveTo(projected.x, projected.y);
+                        } else {
+                            ctx.lineTo(projected.x, projected.y);
+                        }
+                    }
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.lineWidth = 0.5;
+                    ctx.stroke();
+                }
+                
+                for (let j = -75; j <= 75; j += 15) {
+                    ctx.beginPath();
+                    for (let i = 0; i <= 360; i += 3) {
+                        const point = latLonToXYZ(j, i);
+                        const projected = project3D(point.x, point.y, point.z, rotationY, toRadians(10));
+                        if (i === 0) {
+                            ctx.moveTo(projected.x, projected.y);
+                        } else {
+                            ctx.lineTo(projected.x, projected.y);
+                        }
+                    }
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.lineWidth = 0.5;
+                    ctx.stroke();
+                }
+                
+                ctx.restore();
+                
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.clip();
+                
+                continents.forEach(continent => {
+                    const projectedPoints = continent.points.map(([lon, lat]) => {
+                        const xyz = latLonToXYZ(lat, lon);
+                        return project3D(xyz.x, xyz.y, xyz.z, rotationY, toRadians(10));
+                    });
+                    
+                    const avgZ = projectedPoints.reduce((sum, p) => sum + p.z, 0) / projectedPoints.length;
+                    
+                    if (avgZ > -radius * 0.3) {
+                        const alpha = Math.max(0.1, Math.min(0.9, (avgZ + radius) / (radius * 2)));
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(projectedPoints[0].x, projectedPoints[0].y);
+                        for (let i = 1; i < projectedPoints.length; i++) {
+                            ctx.lineTo(projectedPoints[i].x, projectedPoints[i].y);
+                        }
+                        ctx.closePath();
+                        
+                        const continentGradient = ctx.createLinearGradient(
+                            centerX - radius,
+                            centerY - radius,
+                            centerX + radius,
+                            centerY + radius
+                        );
+                        continentGradient.addColorStop(0, `rgba(74, 222, 128, ${alpha})`);
+                        continentGradient.addColorStop(0.5, `rgba(34, 197, 94, ${alpha})`);
+                        continentGradient.addColorStop(1, `rgba(21, 128, 61, ${alpha})`);
+                        
+                        ctx.fillStyle = continentGradient;
+                        ctx.fill();
+                        
+                        ctx.strokeStyle = `rgba(134, 239, 172, ${alpha * 0.6})`;
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
+                });
+                
+                ctx.restore();
+                
+                const atmosphereGradient = ctx.createRadialGradient(
+                    centerX,
+                    centerY,
+                    radius * 0.95,
+                    centerX,
+                    centerY,
+                    radius * 1.08
+                );
+                atmosphereGradient.addColorStop(0, 'rgba(96, 165, 250, 0)');
+                atmosphereGradient.addColorStop(0.5, 'rgba(59, 130, 246, 0.15)');
+                atmosphereGradient.addColorStop(1, 'rgba(37, 99, 235, 0)');
+                
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius * 1.08, 0, Math.PI * 2);
+                ctx.fillStyle = atmosphereGradient;
+                ctx.fill();
+                
+                const highlightGradient = ctx.createRadialGradient(
+                    centerX - radius * 0.4,
+                    centerY - radius * 0.4,
+                    0,
+                    centerX,
+                    centerY,
+                    radius
+                );
+                highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
+                highlightGradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.08)');
+                highlightGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = highlightGradient;
+                ctx.fill();
+                
+                const shadowGradient = ctx.createRadialGradient(
+                    centerX + radius * 0.3,
+                    centerY + radius * 0.3,
+                    0,
+                    centerX,
+                    centerY,
+                    radius
+                );
+                shadowGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+                shadowGradient.addColorStop(0.7, 'rgba(0, 0, 0, 0.15)');
+                shadowGradient.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
+                
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = shadowGradient;
+                ctx.fill();
+            }
+            
+            function animate() {
+                rotationY += rotationSpeed;
+                drawSphere();
+                requestAnimationFrame(animate);
+            }
+            
+            animate();
+        })();
+    </script>
+    <script src="/socket.io/socket.io.js"></script>
+</body>
+</html>

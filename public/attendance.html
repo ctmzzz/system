@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>考勤表 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+
+    <!-- 班级角色默认隐藏不需要的导航（由JS动态控制） -->
+    <style id="roleStyle"></style>
+
+    <style>
+        .user-info.show { opacity:1; }
+    </style>
+    <style>
+        .att-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .att-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .att-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .att-date {
+            padding: 8px 12px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.95rem;
+        }
+        .stats-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        .stat-card-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .stat-card-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .att-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .att-table th {
+            background: #f8fafc;
+            padding: 12px 10px;
+            text-align: center;
+            font-weight: 600;
+            color: var(--text-primary);
+            border-bottom: 2px solid var(--border-color);
+            font-size: 0.9rem;
+        }
+        .att-table td {
+            padding: 10px 8px;
+            text-align: center;
+            border-bottom: 1px solid #f1f5f9;
+            vertical-align: middle;
+        }
+        .att-table tr:hover td {
+            background: #fafbfc;
+        }
+        .att-table .td-left {
+            text-align: left;
+            font-weight: 500;
+        }
+        /* 出勤单选 */
+        .radio-cell {
+            display: flex;
+            justify-content: center;
+        }
+        .radio-cell input[type="radio"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #059669;
+        }
+        /* 迟到时间 */
+        .late-time-input {
+            width: 110px;
+            padding: 5px 8px;
+            border: 2px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            text-align: center;
+        }
+        .late-time-input:focus {
+            outline: none;
+            border-color: #D97706;
+        }
+        .late-time-input.filled {
+            border-color: #D97706;
+            background: #FFFBEB;
+        }
+        /* 请假区域 */
+        .leave-section {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+        }
+        .leave-time-input {
+            width: 100px;
+            padding: 4px 6px;
+            border: 2px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.8rem;
+            text-align: center;
+        }
+        .leave-time-input:focus {
+            outline: none;
+            border-color: #6366F1;
+        }
+        .leave-select {
+            padding: 4px 6px;
+            border: 2px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .leave-select:focus {
+            outline: none;
+            border-color: #6366F1;
+        }
+        .leave-checkbox {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #6366F1;
+        }
+        .leave-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        /* 状态标签 */
+        .status-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .status-badge.present { background: #dcfce7; color: #166534; }
+        .status-badge.late    { background: #FEF3C7; color: #92400E; }
+        .status-badge.absent { background: #fee2e2; color: #991b1b; }
+        .status-badge.absent { background: #FEE2E2; color: #991B1B; }
+        .status-badge.leave  { background: #EEF2FF; color: #3730a3; }
+        /* 请假单图片 */
+        .leave-images { display:flex;flex-wrap:wrap;gap:4px;max-width:220px; }
+        .leave-thumb { position:relative;width:56px;height:56px;border-radius:6px;overflow:hidden;border:1px solid #e2e8f0;cursor:pointer;flex-shrink:0; }
+        .leave-thumb img { width:100%;height:100%;object-fit:cover; }
+        .leave-thumb .del-btn { position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;background:#DC2626;color:#fff;border:none;font-size:12px;line-height:18px;text-align:center;cursor:pointer;display:none;z-index:2;padding:0; }
+        .leave-thumb:hover .del-btn { display:block; }
+        .leave-upload-btn { width:56px;height:56px;border:2px dashed #cbd5e1;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:22px;color:#94a3b8;flex-shrink:0;transition:.2s; }
+        .leave-upload-btn:hover { border-color:#6366F1;color:#6366F1; }
+        .leave-upload-btn.loading { opacity:0.5;pointer-events:none; }
+        /* 缩略图加载动画 */
+        .leave-thumb .thumb-loading { position:absolute;inset:0;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:10px;color:#94a3b8; }
+        /* 图片放大预览 */
+        .lightbox-overlay { position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out; }
+        .lightbox-overlay img { max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5); }
+        /* 上传加载遮罩 */
+        .upload-loading { position:absolute;inset:0;background:rgba(255,255,255,.8);display:flex;align-items:center;justify-content:center;z-index:5;font-size:13px;color:#6366F1; }
+        .btn-save {
+            padding: 10px 30px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-save:hover { background: var(--primary-hover); }
+        .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+        .save-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #059669;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            z-index: 9999;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        /* 导出弹窗 */
+        .export-modal {
+            display: none !important;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 999999;
+            justify-content: center;
+            align-items: center;
+        }
+        .export-modal.show { display: flex !important; }
+        .export-box {
+            background: white;
+            border-radius: 16px;
+            padding: 30px 35px;
+            width: 420px;
+            max-width: 90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+            position: relative;
+            z-index: 999999;
+        }
+        .export-box h3 { font-size:1.2rem; margin-bottom:20px; color:#1e293b; }
+        .export-field { margin-bottom:16px; }
+        .export-field label { display:block; font-size:0.9rem; font-weight:600; color:#374151; margin-bottom:6px; }
+        .export-field input, .export-field select {
+            width:100%; padding:10px 12px; border:2px solid #e2e8f0; border-radius:8px; font-size:0.95rem; box-sizing:border-box;
+        }
+        .export-actions {
+            display:flex; gap:12px; margin-top:24px;
+        }
+        .export-actions button {
+            flex:1; padding:11px; border:none; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer;
+        }
+        .export-btn-confirm { background:var(--primary-color); color:white; }
+        .export-btn-cancel { background:#f1f5f9; color:#64748b; }
+        .export-error {
+            color:#DC2626; font-size:0.78rem; margin-top:4px; display:none;
+        }
+        .export-error.show { display:block; }
+    </style>
+</head>
+<body>
+    <script>
+    (function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/auth/check', false);
+        xhr.send();
+        if (xhr.status === 200) {
+            var data = JSON.parse(xhr.responseText);
+            if (data.loggedIn && data.user.role === 'class') {
+                var s = document.createElement('style');
+                s.textContent = 'a[href="/dashboard"], a[href="/detail-analysis"], a[href="/events"], #navDataManage, #exportBtn, a[href="/homework-manage"] { display:none!important; }';
+                document.head.appendChild(s);
+            }
+        }
+    })();
+    </script>
+    <div class="main-layout">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                <span>成绩分析</span>
+            </div>
+            <nav class="nav-menu">
+                <a href="/dashboard" class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                    成绩分析
+                </a>
+                <a href="/detail-analysis" class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1-5-5-7-7 2-2 2-6 7-6-6 3-5 10 0 13z"/><path d="M21 12c0 4.97-4.03 9-9 9-2.39 0-4.57-.94-6.18-2.47 2.86 1.43 6.86 1.78 9.18-1.53 2.61-3.73 1.27-8.47 0-10 2.7 1.53 6 4.04 6 9z"/></svg>
+                    详细汇总
+                </a>
+                <div class="nav-group">
+                    <div class="nav-parent" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        美丽学分
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub">
+                        <li><a href="/events" class="nav-item">事件</a></li>
+                        <li><a href="/total-table" class="nav-item">总表</a></li>
+                    </ul>
+                </div>
+                <a href="/attendance" class="nav-item active" id="navAttendance">
+                    <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                    考勤表
+                </a>
+                <div class="nav-group" id="navHomework">
+                    <div class="nav-parent" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        作业管理
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub">
+                        <li><a href="/homework-data" class="nav-item">数据</a></li>
+                        <li><a href="/homework-manage" class="nav-item">管理</a></li>
+                    </ul>
+                </div>
+                <a href="/teacher-admin" class="nav-item" id="navDataManage">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    数据管理
+                </a>
+            </nav>
+                    <script>
+        (function(){var a=localStorage.getItem("sidebarAvatar");var n=localStorage.getItem("sidebarName");if(a){var e=document.getElementById("userAvatar");if(e)e.textContent=a;}if(n){var e=document.getElementById("userName");if(e)e.textContent=n;}})();
+    </script>
+            <div class="sidebar-footer">
+                <div class="user-info" style="cursor:pointer;" onclick="openPasswordModal()">
+                    <div class="user-avatar" id="userAvatar"></div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName"></div>
+                        <div style="font-size:0.7rem;color:#94a3b8;">点击修改密码</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" style="margin-top:15px;width:100%;">退出登录</button>
+            </div>
+        </aside>
+
+        <!-- 修改密码弹窗 -->
+        <div class="modal-overlay" id="passwordModal" style="display:none;">
+            <div class="modal" style="max-width:360px;">
+                <div class="modal-header">
+                    <h2 class="modal-title">修改密码</h2>
+                    <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+                </div>
+                <div class="modal-form" style="padding:20px;">
+                    <div class="form-group">
+                        <label>当前密码</label>
+                        <input type="password" id="oldPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入当前密码">
+                    </div>
+                    <div class="form-group" style="margin-top:12px;">
+                        <label>新密码</label>
+                        <input type="password" id="newPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入新密码（至少4位）">
+                    </div>
+                    <div class="form-group" style="margin-top:12px;">
+                        <label>确认新密码</label>
+                        <input type="password" id="confirmPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="再次输入新密码">
+                    </div>
+                    <div id="passwordError" style="color:#DC2626;font-size:0.85rem;margin-top:8px;display:none;"></div>
+                    <div class="modal-actions" style="margin-top:16px;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('passwordModal')">取消</button>
+                        <button type="button" class="btn btn-primary" onclick="changePassword()">确认修改</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+    <style>
+        @keyframes annScroll {
+            0% { transform: translateX(100vw); }
+            100% { transform: translateX(-100%); }
+        }
+    </style>
+<main class="main-content">
+            <div class="page-content">
+                <div class="att-header">
+                    <h1 class="att-title">考勤表</h1>
+                    <div class="att-controls">
+                        <select id="classSelect" style="padding:8px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" onchange="onClassChange()">
+                            <option value="">请选择班级</option>
+                        </select>
+                        <input type="date" id="attDate" class="att-date" onchange="loadAttendance()" max="">
+                        <button class="btn-save" onclick="saveAttendance()">保存考勤</button>
+                        <button class="btn-save" onclick="showExportModal()" id="exportBtn" style="background:#6366F1;">导出考勤表</button>
+                    </div>
+                </div>
+
+                <div class="stats-cards" id="statsCards" style="display:none;">
+                    <div class="stat-card">
+                        <div class="stat-card-value" style="color:#059669;" id="statPresent">0</div>
+                        <div class="stat-card-label">出勤</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-value" style="color:#D97706;" id="statLate">0</div>
+                        <div class="stat-card-label">迟到</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-value" style="color:#DC2626;" id="statAbsent">0</div>
+                        <div class="stat-card-label">缺勤(旷课)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-card-value" style="color:#6366F1;" id="statLeave">0</div>
+                        <div class="stat-card-label">请假</div>
+                    </div>
+                </div>
+
+                <div id="tableContainer" style="display:none;">
+                    <table class="att-table">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left;min-width:80px;">学号</th>
+                                <th style="text-align:left;min-width:80px;">姓名</th>
+                                <th style="width:80px;">出勤</th>
+                                <th style="width:140px;">迟到（到校时间）</th>
+                                <th style="width:140px;">旷课（记录时间）</th>
+                                <th style="width:300px;">请假信息</th>
+                                <th style="min-width:200px;">请假单</th>
+                            </tr>
+                        </thead>
+                        <tbody id="attTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="emptyState" style="text-align:center;padding:60px 20px;color:var(--text-secondary);">
+                    <p style="font-size:1.2rem;margin-bottom:10px;">请选择班级和日期</p>
+                    <p>选择班级和日期后，可以记录学生考勤情况</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 导出考勤表弹窗 -->
+    <div class="export-modal" id="exportModal">
+        <div class="export-box">
+            <h3>导出考勤表</h3>
+            <div class="export-field">
+                <label>选择班级</label>
+                <select id="exportClassSelect"></select>
+                <div class="export-error" id="exportErrClass">请选择班级</div>
+            </div>
+            <div class="export-field">
+                <label>开始日期</label>
+                <input type="date" id="exportStartDate">
+                <div class="export-error" id="exportErrStart">请选择开始日期</div>
+            </div>
+            <div class="export-field">
+                <label>结束日期</label>
+                <input type="date" id="exportEndDate">
+                <div class="export-error" id="exportErrEnd">请选择结束日期</div>
+                <div class="export-error" id="exportErrEndRange">开始日期不能晚于结束日期</div>
+            </div>
+            <div class="export-field">
+                <label>选择学生</label>
+                <select id="exportStudentSelect" multiple style="height:120px;">
+                </select>
+                <div class="export-error" id="exportErrStudent">请至少选择一个学生</div>
+            </div>
+            <div class="export-error" id="exportErrGeneral" style="text-align:center;margin-bottom:10px;"></div>
+            <div class="export-actions">
+                <button class="export-btn-cancel" onclick="closeExportModal()">取消</button>
+                <button class="export-btn-confirm" onclick="doExport()">确认导出</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let students = [];
+        let attendanceData = {};   // { student_id: { status, remark, late_time, leave_time, leave_type, leave_with_note } }
+        let dataVersion = null;    // 考勤数据版本号，用于冲突检测
+        const LEAVE_TYPES = ['事假', '病假', '个人原因'];
+
+        // ===== 初始化 =====
+        async function checkAuth() {
+            try {
+                const res = await fetch('/api/auth/check');
+                const data = await res.json();
+                if (!data.loggedIn) { window.location.href = '/login'; return null; }
+                currentUser = data.user;
+                window.currentUser = data.user;
+        
+
+                const userRole = data.user.role || 'teacher';
+                const roleMap = { admin: '系统管理员', teacher: '班主任', student: '学生', class: '班级' };
+                document.getElementById('userName').textContent = data.user.name + ' ' + (roleMap[userRole] || '');
+                
+            document.getElementById('userAvatar').textContent = data.user.name.charAt(0);
+            localStorage.setItem("sidebarAvatar",data.user.name.charAt(0));localStorage.setItem("sidebarName",data.user.name+" "+(roleMap[data.user.role]||""));
+                if (userRole === 'student') {
+                    window.location.href = '/dashboard';
+                    return null;
+                }
+                // 班级角色：隐藏不需要的导航
+                if (userRole === 'class') {
+                    var rs = document.getElementById('roleStyle');
+                    if (rs) rs.textContent = 'a[href="/dashboard"], a[href="/detail-analysis"], a[href="/events"], #navDataManage, #exportBtn, a[href="/homework-manage"] { display:none!important; }';
+                }
+                return data.user;
+            } catch (e) { window.location.href = '/login'; return null; }
+        }
+
+        function logout() {
+            fetch('/api/logout', { method: 'POST' }).then(() => { window.location.href = '/login'; });
+        }
+
+        // ===== 修改密码 =====
+        function openPasswordModal() {
+            document.getElementById('oldPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+            document.getElementById('passwordError').style.display = 'none';
+            document.getElementById('passwordModal').style.display = 'flex';
+        }
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+        async function changePassword() {
+            const oldPwd = document.getElementById('oldPassword').value;
+            const newPwd = document.getElementById('newPassword').value;
+            const confirmPwd = document.getElementById('confirmPassword').value;
+            const errEl = document.getElementById('passwordError');
+            if (!oldPwd || !newPwd) { errEl.textContent = '请填写完整'; errEl.style.display = 'block'; return; }
+            if (newPwd.length < 4) { errEl.textContent = '新密码至少4位'; errEl.style.display = 'block'; return; }
+            if (newPwd !== confirmPwd) { errEl.textContent = '两次密码不一致'; errEl.style.display = 'block'; return; }
+            try {
+                const res = await fetch('/api/change-password', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeModal('passwordModal');
+                    showToast('✅ 密码修改成功');
+                } else {
+                    errEl.textContent = data.message || '修改失败';
+                    errEl.style.display = 'block';
+                }
+            } catch(e) {
+                errEl.textContent = '网络错误';
+                errEl.style.display = 'block';
+            }
+        }
+
+        function toggleSubMenu(el) {
+            const sub = el.nextElementSibling;
+            el.classList.toggle('expanded');
+            sub.classList.toggle('expanded');
+        }
+
+        // ===== 班级加载 =====
+        async function loadClasses() {
+            const res = await fetch('/api/classes');
+            const data = await res.json();
+            const select = document.getElementById('classSelect');
+            if (!data.success || !data.data || data.data.length === 0) {
+                select.innerHTML = '<option value="">暂无班级</option>';
+                return;
+            }
+            data.data.sort((a, b) => b.id - a.id);
+            select.innerHTML = '<option value="">请选择班级</option>' +
+                data.data.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+            // 非班级角色：默认选中第一个（最新创建的班级）
+            if (!currentUser || currentUser.role !== 'class') {
+                select.value = data.data[0].id;
+                loadAttendance();
+            }
+            // 班级角色自动选中对应班级
+            if (currentUser && currentUser.role === 'class') {
+                const classNo = currentUser.employee_id;
+                const matched = data.data.find(c => c.name === classNo || c.name === classNo + '班级');
+                if (matched) {
+                    select.value = matched.id;
+                    loadAttendance();
+                }
+                select.disabled = true; // 班级角色不能切换班级
+            }
+        }
+
+        function onClassChange() {
+            loadAttendance();
+        }
+
+        // ===== 加载考勤 =====
+        async function loadAttendance() {
+            const classId = document.getElementById('classSelect').value;
+            const date = document.getElementById('attDate').value;
+            if (!classId || !date) {
+                document.getElementById('tableContainer').style.display = 'none';
+                document.getElementById('statsCards').style.display = 'none';
+                document.getElementById('emptyState').style.display = 'block';
+                return;
+            }
+
+            // 加载学生
+            const stuRes = await fetch(`/api/students?class_id=${classId}`);
+            const stuData = await stuRes.json();
+            if (!stuData.success || !stuData.data) {
+                alert('加载学生列表失败');
+                return;
+            }
+            students = stuData.data;
+
+            // 加载已保存的考勤
+            const attRes = await fetch(`/api/attendance?class_id=${classId}&date=${date}`);
+            const attData = await attRes.json();
+            attendanceData = {};
+            existingImages = {};
+            if (attData.success && attData.data) {
+                dataVersion = attData.data_version || null;
+                const date = document.getElementById('attDate').value;
+                attData.data.forEach(a => {
+                    // 尝试从 remark 读取图片列表（JSON 格式）
+                    let images = [];
+                    try { const p = JSON.parse(a.remark || '[]'); if (Array.isArray(p)) images = p; } catch(e) {}
+                    // 如果 remark 不是 JSON，存为文本
+                    attendanceData[a.student_id] = {
+                        status: a.status || 'present',
+                        remark: images.length ? JSON.stringify(images) : (a.remark || ''),
+                        late_arrive: a.late_time || '',
+                        absent_arrive: a.absent_time || '',
+                        leave_time: a.leave_time || '',
+                        leave_type: a.leave_type || '',
+                        leave_with_note: a.leave_with_note || '0',
+                        leave_duration: a.leave_duration || '',
+                        leaveImages: images
+                    };
+                    const key = a.student_id + '|' + date;
+                    existingImages[key] = images;
+                });
+            }
+
+            renderTable();
+            document.getElementById('tableContainer').style.display = 'block';
+            document.getElementById('statsCards').style.display = 'grid';
+            document.getElementById('emptyState').style.display = 'none';
+        }
+
+        // ===== 渲染表格 =====
+        function renderTable() {
+            const tbody = document.getElementById('attTableBody');
+            let html = '';
+            let stats = { present: 0, late: 0, absent: 0, leave: 0 };
+            const currentDate = document.getElementById('attDate').value || '';
+
+            students.forEach(s => {
+                const d = attendanceData[s.id] || { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+                const hasLate = !!(d.late_arrive);
+                const hasAbsent = !!(d.absent_arrive);
+                const hasLeave = !!(d.leave_type && d.leave_type.trim());
+                
+                // 自动判断状态（优先：旷课 > 请假 > 迟到 > 出勤）
+                let status = d.status;
+                if (hasAbsent) status = 'absent';
+                else if (hasLeave) status = 'leave';
+                else if (hasLate) status = 'late';
+
+                stats[status] = (stats[status] || 0) + 1;
+
+                const isPresent = (status === 'present');
+                const isLate = (status === 'late');
+                const isAbsent = (status === 'absent');
+                const isLeave = (status === 'leave');
+
+                html += `<tr data-sid="${s.id}">
+                    <td class="td-left" style="font-weight:600;">${s.student_id}</td>
+                    <td class="td-left">${s.name}</td>
+                    <!-- 出勤单选按钮 -->
+                    <td style="text-align:center;vertical-align:middle;">
+                        <input type="radio" name="status_${s.id}" value="present"
+                            ${isPresent ? 'checked' : ''}
+                            onchange="onStatusChange(${s.id})"
+                            style="width:20px;height:20px;cursor:pointer;accent-color:#059669;
+                            ${isLate || isAbsent || isLeave ? 'opacity:0.3;' : ''}">
+                    </td>
+                    <!-- 迟到（到校时间） -->
+                    <td style="text-align:center;">
+                        <div style="display:flex;flex-direction:column;gap:3px;align-items:center;">
+                            <input type="time" value="${d.late_arrive || ''}"
+                                onchange="onLateInput(${s.id})"
+                                style="width:90px;padding:4px 6px;border:2px solid ${isLate ? '#D97706' : '#e2e8f0'};border-radius:6px;font-size:0.82rem;">
+                            <span style="font-size:0.7rem;color:${isLate ? '#92400E' : '#94a3b8'};">到校时间（不得早于7:50）</span>
+                        </div>
+                    </td>
+                    <!-- 旷课（记录时间） -->
+                    <td style="text-align:center;">
+                        <div style="display:flex;flex-direction:column;gap:3px;align-items:center;">
+                            <input type="time" value="${d.absent_arrive || ''}"
+                                onchange="onAbsentInput(${s.id})"
+                                style="width:90px;padding:4px 6px;border:2px solid ${isAbsent ? '#DC2626' : '#e2e8f0'};border-radius:6px;font-size:0.82rem;">
+                            <span style="font-size:0.7rem;color:${isAbsent ? '#991B1B' : '#94a3b8'};">记录时间（不得早于7:50）</span>
+                        </div>
+                    </td>
+                    <!-- 请假信息 -->
+                    <td style="text-align:center;">
+                        <div style="display:flex;flex-direction:column;gap:4px;align-items:center;">
+                            <div style="font-size:0.75rem;color:#888;margin-bottom:2px;">请假日期: ${currentDate || '选择日期'}</div>
+                            <select style="padding:4px 8px;border:2px solid ${isLeave ? '#6366F1' : '#e2e8f0'};border-radius:6px;font-size:0.8rem;width:160px;"
+                                onchange="onLeaveFieldChange(${s.id})">
+                                <option value="" disabled ${d.leave_type===''?'selected':''}>请选择请假类别</option>
+                                ${LEAVE_TYPES.map(t => `<option value="${t}" ${d.leave_type===t?'selected':''}>${t}</option>`).join('')}
+                            </select>
+                            <span style="font-size:0.75rem;color:${(d.leaveImages||[]).length ? '#059669' : '#94a3b8'};">${(d.leaveImages||[]).length ? '已上传 '+(d.leaveImages||[]).length+' 张请假单' : '未上传请假单'}</span>
+                            <input type="text" value="${d.leave_duration || ''}" placeholder="如：几点离校、请假一天"
+                                onchange="onLeaveDurationChange(${s.id}, this.value)"
+                                style="width:130px;padding:4px 8px;border:2px solid ${isLeave ? '#6366F1' : '#e2e8f0'};border-radius:6px;font-size:0.8rem;text-align:center;"
+                                ${!d.leave_type ? 'disabled' : ''}>
+                            <span style="font-size:0.7rem;color:${isLeave ? '#4338CA' : '#94a3b8'};">请假时长</span>
+                            </label>
+                        </div>
+                    </td>
+                    <!-- 请假单 -->
+                    <td>
+                        <div class="leave-images" id="leaveImgs_${s.id}">
+                            ${(d.leaveImages || []).map(img => `
+                                <div class="leave-thumb" onclick="openLightbox('${img}')">
+                                    <img src="${img}" alt="请假单" onerror="this.closest('.leave-thumb').style.display='none';removeImageData(${s.id},'${img}')">
+                                    <button class="del-btn" onclick="event.stopPropagation();confirmDeleteImage(${s.id}, '${img}')">✕</button>
+                                </div>
+                            `).join('')}
+                            ${d.leave_type ? `
+                                <div class="leave-upload-btn" onclick="uploadLeaveImage(${s.id})" id="uploadBtn_${s.id}">+</div>
+                            ` : ''}
+                        </div>
+                        <div id="uploadLoading_${s.id}" style="display:none;font-size:0.8rem;color:#6366F1;">上传中...</div>
+                        ${!d.leave_type ? '<span style="font-size:0.75rem;color:#94a3b8;">请先选择请假类别</span>' : ''}
+                    </td>
+                </tr>`;
+            });
+
+            tbody.innerHTML = html;
+            updateStatsDisplay(stats);
+        }
+
+        // ===== 交互逻辑 =====
+        function onStatusChange(studentId) {
+            if (!attendanceData[studentId]) attendanceData[studentId] = { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+            attendanceData[studentId].status = 'present';
+            attendanceData[studentId].late_arrive = '';
+            attendanceData[studentId].absent_arrive = '';
+            attendanceData[studentId].leave_time = '';
+            attendanceData[studentId].leave_type = '';
+            attendanceData[studentId].leave_with_note = '0';
+            attendanceData[studentId].leave_duration = '';
+            renderTable();
+        }
+
+        function validateArriveTime(timeVal, fieldName) {
+            if (!timeVal) return null; // 清空 = 没问题
+            const [h, m] = timeVal.split(':').map(Number);
+            const totalMin = h * 60 + m;
+            const baseMin = 7 * 60 + 50;
+            if (totalMin < baseMin) return fieldName + '不得早于 7:50';
+            if (totalMin > 23 * 60 + 59) return fieldName + '不得晚于 23:59';
+            return null;
+        }
+
+        function onLateInput(studentId) {
+            const row = document.querySelector(`tr[data-sid="${studentId}"]`);
+            if (!row) return;
+            const timeInput = row.querySelector('td:nth-child(4) input[type="time"]');
+            const val = timeInput?.value || '';
+
+            const err = validateArriveTime(val, '到校时间');
+            if (err) { alert(err); timeInput.value = ''; renderTable(); return; }
+
+            if (!attendanceData[studentId]) attendanceData[studentId] = { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+            attendanceData[studentId].late_arrive = val;
+
+            if (val) {
+                // 选迟到 → 清空旷课、请假
+                attendanceData[studentId].status = 'late';
+                attendanceData[studentId].absent_arrive = '';
+                attendanceData[studentId].leave_time = '';
+                attendanceData[studentId].leave_type = '';
+                attendanceData[studentId].leave_with_note = '0';
+                attendanceData[studentId].leave_duration = '';
+            } else {
+                attendanceData[studentId].status = 'present';
+            }
+            renderTable();
+        }
+
+        function onAbsentInput(studentId) {
+            const row = document.querySelector(`tr[data-sid="${studentId}"]`);
+            if (!row) return;
+            const timeInput = row.querySelector('td:nth-child(5) input[type="time"]');
+            const val = timeInput?.value || '';
+
+            const err = validateArriveTime(val, '记录时间');
+            if (err) { alert(err); timeInput.value = ''; renderTable(); return; }
+
+            if (!attendanceData[studentId]) attendanceData[studentId] = { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+            attendanceData[studentId].absent_arrive = val;
+
+            if (val) {
+                // 旷课 >请假 >迟到
+                attendanceData[studentId].status = 'absent';
+                attendanceData[studentId].late_arrive = '';
+                attendanceData[studentId].leave_time = '';
+                attendanceData[studentId].leave_type = '';
+                attendanceData[studentId].leave_with_note = '0';
+                attendanceData[studentId].leave_duration = '';
+            } else {
+                // 清空旷课后，恢复迟到判断
+                if (attendanceData[studentId].late_arrive) {
+                    attendanceData[studentId].status = 'late';
+                } else {
+                    attendanceData[studentId].status = 'present';
+                }
+            }
+            renderTable();
+        }
+
+        // 选择请假日期 → 自动进入请假模式
+        function onLeaveDateChange(studentId, inputEl) {
+            const date = inputEl ? inputEl.value : '';
+
+            if (!attendanceData[studentId]) attendanceData[studentId] = { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+            attendanceData[studentId].leave_time = date;
+
+            if (date) {
+                // 选了日期 → 进入请假模式，取消出勤按钮，清空迟到和旷课
+                attendanceData[studentId].status = 'leave';
+                attendanceData[studentId].late_arrive = '';
+                attendanceData[studentId].absent_arrive = '';
+            } else {
+                attendanceData[studentId].status = 'present';
+                attendanceData[studentId].leave_type = '';
+                attendanceData[studentId].leave_with_note = '0';
+                attendanceData[studentId].leave_duration = '';
+            }
+            renderTable();
+        }
+
+        function onLeaveFieldChange(studentId) {
+            if (!attendanceData[studentId]) attendanceData[studentId] = { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+            const row = document.querySelector(`tr[data-sid="${studentId}"]`);
+            if (!row) return;
+            const type = row.querySelector('td:nth-child(6) select')?.value || '';
+            const note = row.querySelector('td:nth-child(6) input[type="checkbox"]')?.checked ? '1' : '0';
+
+            if (!attendanceData[studentId]) return;
+            attendanceData[studentId].leave_type = type;
+            attendanceData[studentId].leave_with_note = note;
+
+            // 选了请假类别 → 自动设为请假，日期使用表日期
+            const tableDate = document.getElementById('attDate').value;
+            if (type) {
+                attendanceData[studentId].leave_time = tableDate;
+                attendanceData[studentId].status = 'leave';
+                attendanceData[studentId].late_arrive = '';
+                attendanceData[studentId].absent_arrive = '';
+            } else {
+                attendanceData[studentId].leave_time = '';
+                attendanceData[studentId].status = 'present';
+            }
+            renderTable();
+        }
+
+        function onLeaveDurationChange(studentId, value) {
+            if (!attendanceData[studentId]) attendanceData[studentId] = { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+            attendanceData[studentId].leave_duration = value;
+        }
+
+        // 记录已存在的图片（加载时填充）
+        let existingImages = {};
+
+        // ===== 请假单图片功能 =====
+        function uploadLeaveImage(studentId) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = async function() {
+                const file = input.files[0];
+                if (!file) return;
+                const clsId = document.getElementById('classSelect')?.value || document.querySelector('#attTableBody tr')?.dataset?.sid;
+                const date = document.getElementById('attDate').value;
+                if (!date) { showToast('请先选择日期', 'error'); return; }
+                const loading = document.getElementById('uploadLoading_' + studentId);
+                const btn = document.getElementById('uploadBtn_' + studentId);
+                if (loading) loading.style.display = 'block';
+                if (btn) btn.classList.add('loading');
+                try {
+                    const fd = new FormData();
+                    fd.append('images', file);
+                    fd.append('class_id', document.getElementById('classSelect').value || '0');
+                    fd.append('student_id', studentId);
+                    fd.append('date', date);
+                    const res = await fetch('/api/attendance/leave-image/upload', { method:'POST', body:fd });
+                    const result = await res.json();
+                    if (result.success && result.data.length) {
+                        if (!attendanceData[studentId]) attendanceData[studentId] = { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+                        if (!attendanceData[studentId].leaveImages) attendanceData[studentId].leaveImages = [];
+                        result.data.forEach(img => attendanceData[studentId].leaveImages.push(img.url));
+                        renderTable();
+                        showToast('图片已上传', 'success');
+                    } else {
+                        showToast(result.message || '上传失败', 'error');
+                    }
+                } catch(e) {
+                    showToast('上传失败: ' + e.message, 'error');
+                } finally {
+                    if (loading) loading.style.display = 'none';
+                    if (btn) btn.classList.remove('loading');
+                }
+            };
+            input.click();
+        }
+
+        function confirmDeleteImage(studentId, imgUrl) {
+            if (!confirm('确定删除这张请假单图片吗？')) return;
+            const filename = imgUrl.split('/').pop();
+            fetch('/api/attendance/leave-image/delete', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({filename})
+            }).then(r=>r.json()).then(result=>{
+                if (result.success) {
+                    if (attendanceData[studentId] && attendanceData[studentId].leaveImages) {
+                        attendanceData[studentId].leaveImages = attendanceData[studentId].leaveImages.filter(u => u !== imgUrl);
+                    }
+                    renderTable();
+                    showToast('图片已删除', 'success');
+                } else {
+                    showToast(result.message || '删除失败', 'error');
+                }
+            }).catch(() => showToast('删除失败', 'error'));
+        }
+
+        // 图片加载失败时自动移除记录
+        function removeImageData(studentId, imgUrl) {
+            if (attendanceData[studentId] && attendanceData[studentId].leaveImages) {
+                attendanceData[studentId].leaveImages = attendanceData[studentId].leaveImages.filter(u => u !== imgUrl);
+            }
+        }
+
+        function openLightbox(imgUrl) {
+            const ov = document.createElement('div');
+            ov.className = 'lightbox-overlay';
+            ov.innerHTML = `<img src="${imgUrl}" alt="请假单">`;
+            ov.onclick = () => ov.remove();
+            document.body.appendChild(ov);
+        }
+
+        // 加载已存在的图片（从 remark 字段兼容读取）
+        function loadExistingImages() {
+            Object.keys(existingImages).forEach(k => {
+                const [sid, date] = k.split('|');
+                if (attendanceData[sid] && existingImages[k].length) {
+                    if (!attendanceData[sid].leaveImages) attendanceData[sid].leaveImages = [];
+                    existingImages[k].forEach(url => {
+                        if (!attendanceData[sid].leaveImages.includes(url)) {
+                            attendanceData[sid].leaveImages.push(url);
+                        }
+                    });
+                }
+            });
+        }
+
+        // ===== 统计 =====
+        function updateStats() {
+            const stats = { present:0, late:0, absent:0, leave:0 };
+            students.forEach(s => {
+                const d = attendanceData[s.id] || { status:'present' };
+                const st = d.status || 'present';
+                stats[st] = (stats[st] || 0) + 1;
+            });
+            updateStatsDisplay(stats);
+        }
+        function updateStatsDisplay(stats) {
+            document.getElementById('statPresent').textContent = stats.present || 0;
+            document.getElementById('statLate').textContent = stats.late || 0;
+            document.getElementById('statAbsent').textContent = stats.absent || 0;
+            document.getElementById('statLeave').textContent = stats.leave || 0;
+        }
+
+        // ===== 保存 =====
+        function validateAttendance() {
+            const errors = [];
+            students.forEach(s => {
+                const d = attendanceData[s.id];
+                if (!d) return;
+                if (d.status === 'late') {
+                    if (!d.late_arrive) {
+                        errors.push(`${s.name}：迟到已选，请选择到校时间`);
+                    }
+                }
+                if (d.status === 'absent') {
+                    if (!d.absent_arrive) {
+                        errors.push(`${s.name}：旷课已选，请选择记录时间`);
+                    }
+                }
+                if (d.status === 'leave') {
+                    if (!d.leave_time || !d.leave_time.trim()) {
+                        errors.push(`${s.name}（请假）：请选择请假日期`);
+                    }
+                    if (!d.leave_type || !d.leave_type.trim()) {
+                        errors.push(`${s.name}（请假）：请选择请假类别`);
+                    }
+                }
+            });
+            return errors;
+        }
+
+        async function saveAttendance(silent) {
+            const classId = document.getElementById('classSelect').value;
+            const date = document.getElementById('attDate').value;
+            if (!classId || !date) { alert('请先选择班级和日期'); return; }
+
+            // 验证
+            const errors = validateAttendance();
+            if (errors.length > 0) {
+                alert('保存失败，以下内容未填写完整：\n' + errors.join('\n'));
+                return;
+            }
+
+            const records = students.map(s => {
+                const d = attendanceData[s.id] || { status:'present', remark:'', late_arrive:'', absent_arrive:'', leave_time:'', leave_type:'', leave_with_note:'0', leave_duration:'' };
+                return {
+                    student_id: s.id,
+                    status: d.status,
+                    remark: (d.leaveImages && d.leaveImages.length) ? JSON.stringify(d.leaveImages) : '',
+                    late_time: d.late_arrive || '',
+                    absent_time: d.absent_arrive || '',
+                    leave_time: d.leave_time || '',
+                    leave_type: d.leave_type || '',
+                    leave_with_note: (d.leaveImages && d.leaveImages.length) ? '1' : '0',
+                    leave_duration: d.leave_duration || ''
+                };
+            });
+
+            const res = await fetch('/api/attendance/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    class_id: classId,
+                    date,
+                    records,
+                    data_version: dataVersion,
+                    clientId: window.Collab ? Collab.getClientId() : null,
+                    timestamp: Date.now()
+                })
+            });
+            const data = await res.json();
+            if (data.conflict) {
+                showToast('⚠️ 考勤数据已被其他设备修改，正在同步最新数据...');
+                setTimeout(() => { loadAttendance(); }, 500);
+                return;
+            }
+            if (data.success) {
+                dataVersion = data.data_version || Date.now();
+                if (!silent) showToast(data.deduplicated ? '数据已同步（去重）' : '保存成功');
+
+                if (window.Collab && Collab.isConnected()) {
+                    Collab.sendEdit('attendance', classId + '_' + date, {
+                        class_id: classId,
+                        date: date,
+                        recordCount: records.length
+                    });
+                }
+            } else {
+                alert('保存失败：' + (data.message || '未知错误'));
+            }
+        }
+
+        // ===== 弹窗 & Toast =====
+        function showToast(msg) {
+            const t = document.createElement('div');
+            t.className = 'save-toast';
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 2000);
+        }
+
+        // ===== 导出考勤表 =====
+        function showExportModal() {
+            // 复制班级选择
+            const classSel = document.getElementById('classSelect');
+            const expClassSel = document.getElementById('exportClassSelect');
+            expClassSel.innerHTML = classSel.innerHTML;
+            if (document.getElementById('classSelect').value) {
+                expClassSel.value = document.getElementById('classSelect').value;
+            }
+            onExportClassChange();
+            // 设置默认日期范围（当天 ~ 月末）
+            const now = new Date();
+            const today = now.toISOString().slice(0, 10);
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+            document.getElementById('exportStartDate').value = today;
+            document.getElementById('exportEndDate').value = lastDay;
+            document.getElementById('exportModal').classList.add('show');
+        }
+
+        function closeExportModal() {
+            document.getElementById('exportModal').classList.remove('show');
+        }
+
+        async function onExportClassChange() {
+            const classId = document.getElementById('exportClassSelect').value;
+            const sel = document.getElementById('exportStudentSelect');
+            sel.innerHTML = '';
+            if (!classId) return;
+            try {
+                const res = await fetch(`/api/students?class_id=${classId}`);
+                const data = await res.json();
+                if (data.success && data.data) {
+                    data.data.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = `${s.student_id} ${s.name}`;
+                        sel.appendChild(opt);
+                    });
+                }
+            } catch(e) {}
+        }
+
+        document.getElementById('exportClassSelect')?.addEventListener('change', onExportClassChange);
+
+        function clearExportErrors() {
+            document.querySelectorAll('.export-error').forEach(el => el.classList.remove('show'));
+        }
+
+        async function doExport() {
+            clearExportErrors();
+            const classId = document.getElementById('exportClassSelect').value;
+            const startDate = document.getElementById('exportStartDate').value;
+            const endDate = document.getElementById('exportEndDate').value;
+
+            let hasErr = false;
+            if (!classId) { document.getElementById('exportErrClass').classList.add('show'); hasErr = true; }
+            if (!startDate) { document.getElementById('exportErrStart').classList.add('show'); hasErr = true; }
+            if (!endDate) { document.getElementById('exportErrEnd').classList.add('show'); hasErr = true; }
+            if (hasErr) return;
+
+            if (new Date(startDate) > new Date(endDate)) {
+                document.getElementById('exportErrEndRange').classList.add('show');
+                return;
+            }
+            
+            // 获取选中学生
+            const studentOpts = Array.from(document.getElementById('exportStudentSelect').selectedOptions).filter(o => o.value);
+            if (studentOpts.length === 0) {
+                document.getElementById('exportErrStudent').classList.add('show');
+                return;
+            }
+            const studentIds = studentOpts.map(o => o.value);
+
+            closeExportModal();
+            showToast('正在生成Excel，请稍候...');
+
+            try {
+                const res = await fetch('/api/attendance/export', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ class_id: classId, start_date: startDate, end_date: endDate, student_ids: studentIds })
+                });
+                if (!res.ok) throw new Error('导出失败');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `考勤表_${startDate}_${endDate}.xlsx`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('导出成功！');
+            } catch(e) {
+                // 重新打开弹窗，显示错误信息
+                showExportModal();
+                const errEl = document.getElementById('exportErrGeneral');
+                errEl.textContent = '❌ ' + (e.message || '导出失败');
+                errEl.classList.add('show');
+            }
+        }
+
+        // ===== 自动保存（每分钟自动保存一次） =====
+        let autoSaveTimer = null;
+        function startAutoSave() {
+            if (autoSaveTimer) clearInterval(autoSaveTimer);
+            autoSaveTimer = setInterval(async () => {
+                const classId = document.getElementById('classSelect').value;
+                const date = document.getElementById('attDate').value;
+                if (!classId || !date) return;
+                const statusEl = document.getElementById('autoSaveStatus');
+                if (!statusEl) return;
+                statusEl.style.opacity = '1';
+                statusEl.textContent = '⏳ 自动保存';
+                try {
+                    await saveAttendance(true);
+                    statusEl.textContent = '✅ 已保存';
+                } catch(e) {
+                    statusEl.textContent = '❌ 保存失败';
+                }
+                setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            }, 60000);
+        }
+
+        // ===== 启动 =====
+        (async function() {
+            await checkAuth();
+            const today = new Date().toISOString().slice(0, 10);
+            document.getElementById('attDate').value = today;
+            document.getElementById('attDate').setAttribute('max', today);
+            await loadClasses();
+            startAutoSave();
+            if (window.Collab && currentUser && currentUser.role === 'class') {
+                Collab.connect();
+            }
+        })();
+    </script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/collab.js"></script>
+    <script>
+    (function() {
+        if (!window.Collab) return;
+        Collab.on('collab_update', function(data) {
+            if (data.docType === 'attendance') {
+                var clsId = document.getElementById('classSelect').value;
+                var date = document.getElementById('attDate').value;
+                if (data.docId === clsId + '_' + date) {
+                    console.log('[考勤] 收到协同更新，刷新数据');
+                    if (typeof loadAttendance === 'function') loadAttendance();
+                }
+            }
+        });
+        Collab.on('collab_locked', function(data) {
+            if (data.docType === 'attendance') {
+                showToast(data.lockedBy + ' 正在编辑考勤表...', 'info');
+            }
+        });
+        Collab.on('collab_unlocked', function(data) {
+            if (data.docType === 'attendance') {
+                showToast(data.unlockedBy + ' 已完成编辑', 'info');
+            }
+        });
+    })();
+    </script>
+
+</body>
+</html>

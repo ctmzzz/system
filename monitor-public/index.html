@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服务器监控面板</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div id="loginPage" class="login-page">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                        <line x1="8" y1="21" x2="16" y2="21"/>
+                        <line x1="12" y1="17" x2="12" y2="21"/>
+                    </svg>
+                </div>
+                <h1>服务器监控</h1>
+                <p>请输入管理员账号登录</p>
+            </div>
+            <form id="loginForm" class="login-form">
+                <div class="input-group">
+                    <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                    <input type="text" id="username" placeholder="用户名" required autocomplete="off">
+                </div>
+                <div class="input-group">
+                    <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                    <input type="password" id="password" placeholder="密码" required>
+                </div>
+                <div id="loginError" class="login-error"></div>
+                <button type="submit" class="login-btn">
+                    <span class="btn-text">登 录</span>
+                    <span class="btn-loader" style="display:none">
+                        <span class="loader-dot"></span>
+                        <span class="loader-dot"></span>
+                        <span class="loader-dot"></span>
+                    </span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div id="monitorPage" class="monitor-page" style="display:none">
+        <header class="top-bar">
+            <div class="top-bar-left">
+                <div class="logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                        <line x1="8" y1="21" x2="16" y2="21"/>
+                        <line x1="12" y1="17" x2="12" y2="21"/>
+                    </svg>
+                    <span>监控面板</span>
+                </div>
+                <div id="connectionStatus" class="connection-status connected">
+                    <span class="status-dot"></span>
+                    <span class="status-text">已连接</span>
+                </div>
+            </div>
+            <div class="top-bar-right">
+                <span id="perfStats" class="perf-stats">FPS:60 | DOM:0 | Mem:0MB | LT:0</span>
+                <button id="logoutBtn" class="logout-btn">退出</button>
+            </div>
+        </header>
+
+        <main class="dashboard">
+            <div class="cards-row">
+                <div class="card cpu-card">
+                    <div class="card-header">
+                        <div class="card-icon cpu-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
+                                <rect x="9" y="9" width="6" height="6"/>
+                                <line x1="9" y1="1" x2="9" y2="4"/>
+                                <line x1="15" y1="1" x2="15" y2="4"/>
+                                <line x1="9" y1="20" x2="9" y2="23"/>
+                                <line x1="15" y1="20" x2="15" y2="23"/>
+                                <line x1="20" y1="9" x2="23" y2="9"/>
+                                <line x1="20" y1="14" x2="23" y2="14"/>
+                                <line x1="1" y1="9" x2="4" y2="9"/>
+                                <line x1="1" y1="14" x2="4" y2="14"/>
+                            </svg>
+                        </div>
+                        <span>CPU</span>
+                    </div>
+                    <div class="card-value" id="cpuValue">--%</div>
+                    <div class="card-progress">
+                        <div class="progress-bar cpu-bar" id="cpuProgress" style="width:0%"></div>
+                    </div>
+                    <div class="card-detail" id="cpuCores">-- 核心</div>
+                </div>
+
+                <div class="card memory-card">
+                    <div class="card-header">
+                        <div class="card-icon memory-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                            </svg>
+                        </div>
+                        <span>内存</span>
+                    </div>
+                    <div class="card-value" id="memoryValue">--%</div>
+                    <div class="card-progress">
+                        <div class="progress-bar memory-bar" id="memoryProgress" style="width:0%"></div>
+                    </div>
+                    <div class="card-detail" id="memoryDetail">--GB / --GB</div>
+                </div>
+
+                <div class="card disk-card">
+                    <div class="card-header">
+                        <div class="card-icon disk-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                            </svg>
+                        </div>
+                        <span>磁盘</span>
+                    </div>
+                    <div class="card-value" id="diskValue">--%</div>
+                    <div class="card-progress">
+                        <div class="progress-bar disk-bar" id="diskProgress" style="width:0%"></div>
+                    </div>
+                    <div class="card-detail" id="diskDetail">--GB / --GB</div>
+                </div>
+
+                <div class="card network-card">
+                    <div class="card-header">
+                        <div class="card-icon network-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                            </svg>
+                        </div>
+                        <span>网络</span>
+                    </div>
+                    <div class="card-value network-value" id="networkDetail">↓ -- KB/s | ↑ -- KB/s</div>
+                    <div class="card-detail" id="onlineStatus">
+                        <span class="status-dot online"></span> 在线: 0
+                    </div>
+                </div>
+
+                <div class="card db-card">
+                    <div class="card-header">
+                        <div class="card-icon db-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                            </svg>
+                        </div>
+                        <span>数据库</span>
+                    </div>
+                    <div class="card-value db-value" id="dbStatus">
+                        <span class="status-dot offline"></span> 数据库: 检测中
+                    </div>
+                    <div class="card-detail">MySQL 192.168.3.6</div>
+                </div>
+
+                <div class="card alert-card" id="alertCard">
+                    <div class="card-header">
+                        <div class="card-icon alert-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                <line x1="12" y1="9" x2="12" y2="13"/>
+                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                        </div>
+                        <span>安全告警</span>
+                    </div>
+                    <div class="card-value alert-value" id="alertValue">0</div>
+                    <div class="card-detail" id="attackStatus">无异常</div>
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <div class="chart-header">
+                    <h3>资源趋势</h3>
+                    <div class="chart-legend">
+                        <span class="legend-item"><span class="legend-dot cpu-dot"></span> CPU</span>
+                        <span class="legend-item"><span class="legend-dot memory-dot"></span> 内存</span>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="resourceChart"></canvas>
+                </div>
+            </div>
+
+            <div class="logs-section">
+                <div class="logs-header">
+                    <h3>服务器日志</h3>
+                    <div class="logs-controls">
+                        <div class="filter-group">
+                            <button class="filter-btn active" data-filter="all">全部</button>
+                            <button class="filter-btn" data-filter="info">信息</button>
+                            <button class="filter-btn" data-filter="success">成功</button>
+                            <button class="filter-btn" data-filter="warning">警告</button>
+                            <button class="filter-btn" data-filter="error">错误</button>
+                        </div>
+                        <button id="autoScrollBtn" class="auto-scroll-btn active" title="自动滚动">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                            自动滚动
+                        </button>
+                        <button id="clearLogsBtn" class="clear-btn" title="清空日志">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div id="logsContainer" class="logs-container"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

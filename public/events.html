@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>美丽学分 - 事件</title>
+    <link rel="stylesheet" href="/css/style.css">
+    
+    <style>
+        .user-info.show { opacity:1; }
+    </style>
+    <style>
+        /* 页面整体布局 */
+        .cal-page { display: flex; flex-direction: column; height: calc(100vh - 60px); }
+        
+        /* 顶部工具栏 */
+        .cal-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #e2e8f0; background: white; flex-shrink: 0; }
+        .cal-tb-btn { padding: 4px 12px; border-radius: 4px; border: none; background: transparent; font-size: 0.82rem; color: #334155; cursor: pointer; transition: all 0.15s; }
+        .cal-tb-btn:hover { background: #f1f5f9; color: #1e293b; }
+        .cal-tb-btn.active { background: #dbeafe; color: #2563eb; font-weight: 600; }
+        .cal-tb-sep { width: 1px; height: 20px; background: #e2e8f0; margin: 0 4px; }
+        .cal-ym-select { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 1rem; font-weight: 600; color: #1e293b; }
+
+        /* 主体区域 */
+        .cal-body { display: flex; flex: 1; overflow: hidden; }
+
+        /* 左侧边栏 */
+        .cal-sidebar { width: 220px; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; background: #fafbfc; }
+        .cal-sb-section { padding: 12px 16px; }
+        .cal-sb-title { font-size: 0.78rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; display: flex; align-items: center; gap: 4px; }
+        .cal-sb-title svg { width: 14px; height: 14px; }
+        
+        /* 小日历导航 */
+        .mini-cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .mini-cal-nav-btn { width: 24px; height: 24px; border: none; background: transparent; cursor: pointer; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 0.85rem; }
+        .mini-cal-nav-btn:hover { background: #e2e8f0; color: #334155; }
+        .mini-cal-nav-label { font-size: 0.88rem; font-weight: 600; color: #1e293b; }
+
+        /* 小日历网格 */
+        .mini-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; text-align: center; font-size: 0.72rem; }
+        .mini-cal-wd { padding: 3px 0; color: #94a3b8; font-weight: 500; }
+        .mini-cal-wd:nth-child(6), .mini-cal-wd:nth-child(7) { color: #EF4444; }
+        .mini-cal-day { padding: 3px 0; border-radius: 50%; cursor: pointer; color: #334155; transition: all 0.15s; }
+        .mini-cal-day:hover { background: #e2e8f0; }
+        .mini-cal-day.other-month { color: #cbd5e1; }
+        .mini-cal-day.weekend { color: #EF4444; }
+        .mini-cal-day.holiday { color: #EF4444; }
+        .mini-cal-day.workday { color: #334155; }
+        .mini-cal-day.workday.today { color: white; }
+        .mini-cal-day.today { background: #2563eb; color: white; font-weight: 700; }
+        .mini-cal-day.today.weekend { background: #2563eb; color: white; }
+        .mini-cal-day.selected { box-shadow: inset 0 0 0 2px #2563eb; }
+
+        /* 调休工作日：日期数字为黑色 */
+        .cal-cell.workday .cal-date-num { color: #334155 !important; }
+
+        /* 我的日历区域 */
+        .my-cal-list { margin-top: 4px; }
+        .my-cal-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; font-size: 0.85rem; color: #334155; }
+        .my-cal-checkbox { width: 14px; height: 14px; border: 2px solid #2563eb; border-radius: 3px; background: #eff6ff; position: relative; flex-shrink: 0; }
+        .my-cal-checkbox::after { content:''; position:absolute;left:3px;top:0;width:4px;height:8px;border:solid white;border-width:0 2px 2px 0;transform:rotate(45deg); }
+        .show-all-link { font-size: 0.8rem; color: #2563eb; cursor: pointer; margin-top: 6px; }
+        .show-all-link:hover { text-decoration: underline; }
+
+        /* 主日历区域 */
+        .cal-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: white; }
+        
+        /* 日历表头（星期） */
+        .cal-week-header { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+        .cal-wh-cell { text-align: center; padding: 10px 0; font-size: 0.82rem; font-weight: 500; color: #64748b; }
+        .cal-wh-cell.weekend { color: #EF4444; }
+
+        /* 日历日期网格 */
+        .cal-date-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; flex: 1; overflow-y: auto; }
+        
+        /* 日期单元格 */
+        .cal-cell { border-right: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9; padding: 4px 6px 2px; position: relative; cursor: default; transition: background 0.12s; display: flex; flex-direction: column; }
+        .cal-cell:nth-child(7n) { border-right: none; }
+        .cal-cell:hover { background: #f8fafc; }
+        .cal-cell.other-month { background: #fafbfc; }
+        .cal-cell.other-month:hover { background: #f1f5f9; }
+        
+        /* 日期数字 */
+        .cal-date-num { font-size: 0.82rem; color: #334155; line-height: 1.6; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .cal-cell.other-month .cal-date-num { color: #cbd5e1; }
+        .cal-cell.weekend .cal-date-num { color: #EF4444; }
+        .cal-cell.other-month.weekend .cal-date-num { color: #fecaca; }
+        .cal-date-num.today-num { background: #2563eb; color: white; font-weight: 700; }
+        
+        /* 选中/今天的单元格边框 */
+        .cal-cell.today-cell { outline: 2px solid #2563eb; outline-offset: -2px; z-index: 1; }
+        
+        /* 事件列表区域 */
+        .cal-events-area { margin-top: 2px; flex: 1; overflow-y: auto; }
+        /* 隐藏滚轮 */
+        .cal-events-area::-webkit-scrollbar { width: 0px; height: 0px; }
+        .cal-events-area::-webkit-scrollbar-track { background: transparent; }
+        .cal-events-area::-webkit-scrollbar-thumb { background: transparent; }
+        .cal-events-area { scrollbar-width: none; -ms-overflow-style: none; }
+        
+        .cal-event-chip { font-size: 0.68rem; padding: 2px 5px; border-radius: 3px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; line-height: 1.4; }
+        .cal-event-chip.positive { background: #dcfce7; color: #166534; }
+        .cal-event-chip.negative { background: #fee2e2; color: #991b1b; }
+        .cal-event-chip.neutral { background: #e0e7ff; color: #3730a3; }
+        .cal-event-chip.attendance { background: #fef3c7; color: #92400e; }
+
+        /* 日视图时间轴 */
+        .day-hour-row:hover { background: #f8fafc; }
+        .day-hour-content { transition: background 0.15s; }
+        .day-hour-content:hover { background: #f1f5f9; }
+
+        /* 周视图头部的日期高亮 */
+        .cal-wh-cell.today-num { color: #2563eb; font-weight: 700; }
+    </style>
+    <script>
+    (function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/auth/check', false);
+        xhr.send();
+        if (xhr.status === 200) {
+            var data = JSON.parse(xhr.responseText);
+            if (data.loggedIn && data.user.role === 'student') {
+                var s = document.createElement('style');
+                s.textContent = '#navDataManage,#navMeiliXuefen,#navAttendance,#navHomework{display:none!important}';
+                document.head.appendChild(s);
+            }
+        }
+    })();
+    </script>
+</head>
+<body>
+    <div class="main-layout">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                <span>成绩分析</span>
+            </div>
+            <nav class="nav-menu">
+                <a href="/dashboard" class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                    成绩分析
+                </a>
+                <a href="/detail-analysis" class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1-5-5-7-7 2-2 2-6 7-6-6 3-5 10 0 13z"/><path d="M21 12c0 4.97-4.03 9-9 9-2.39 0-4.57-.94-6.18-2.47 2.86 1.43 6.86 1.78 9.18-1.53 2.61-3.73 1.27-8.47 0-10 2.7 1.53 6 4.04 6 9z"/></svg>
+                    详细汇总
+                </a>
+                <div class="nav-group">
+                    <div class="nav-parent expanded" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        美丽学分
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub expanded">
+                        <li><a href="/events" class="nav-item active">事件</a></li>
+                        <li><a href="/total-table" class="nav-item">总表</a></li>
+                    </ul>
+                </div>
+                <a href="/attendance" class="nav-item" id="navAttendance">
+                    <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                    考勤表
+                </a>
+                <div class="nav-group" id="navHomework">
+                    <div class="nav-parent" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        作业管理
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub">
+                        <li><a href="/homework-data" class="nav-item">数据</a></li>
+                        <li><a href="/homework-manage" class="nav-item">管理</a></li>
+                    </ul>
+                </div>
+                <a href="/teacher-admin" class="nav-item" id="navDataManage">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    数据管理
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info" style="cursor:pointer;" onclick="openPasswordModal()">
+                    <div class="user-avatar" id="userAvatar"></div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName"></div>
+                        <div style="font-size:0.7rem;color:#94a3b8;">点击修改密码</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" style="margin-top:15px;width:100%;">退出登录</button>
+            </div>
+        </aside>
+        <script>
+            (function restoreSidebarUser() {
+                const avatar = localStorage.getItem('sidebarUserAvatar');
+                const name = localStorage.getItem('sidebarUserName');
+                const avatarEl = document.getElementById('userAvatar');
+                const nameEl = document.getElementById('userName');
+                if (avatar && avatarEl) {
+                    avatarEl.textContent = avatar;
+                }
+                if (name && nameEl) {
+                    nameEl.textContent = name;
+                }
+            })();
+        </script>
+        <!-- 修改密码弹窗 -->
+        <div class="modal-overlay" id="passwordModal" style="display:none;">
+            <div class="modal" style="max-width:360px;">
+                <div class="modal-header">
+                    <h2 class="modal-title">修改密码</h2>
+                    <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+                </div>
+                <div class="modal-form" style="padding:20px;">
+                    <div class="form-group"><label>当前密码</label><input type="password" id="oldPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入当前密码"></div>
+                    <div class="form-group" style="margin-top:12px;"><label>新密码</label><input type="password" id="newPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入新密码（至少4位）"></div>
+                    <div class="form-group" style="margin-top:12px;"><label>确认新密码</label><input type="password" id="confirmPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="再次输入新密码"></div>
+                    <div id="passwordError" style="color:#DC2626;font-size:0.85rem;margin-top:8px;display:none;"></div>
+                    <div class="modal-actions" style="margin-top:16px;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('passwordModal')">取消</button>
+                        <button type="button" class="btn btn-primary" onclick="changePassword()">确认修改</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+    <style>
+        @keyframes annScroll {
+            0% { transform: translateX(100vw); }
+            100% { transform: translateX(-100%); }
+        }
+    </style>
+<main class="main-content" style="padding:0;overflow:hidden;">
+            <div class="cal-page">
+                <!-- 工具栏 -->
+                <div class="cal-toolbar">
+                    <button class="cal-tb-btn active" id="tbMonth">月</button>
+                    <button class="cal-tb-btn" id="tbWeek">周</button>
+                    <button class="cal-tb-btn" id="tbDay">日</button>
+                    <button class="cal-tb-btn" id="tbSchedule">日程表</button>
+                    <div class="cal-tb-sep"></div>
+                    <button class="cal-tb-btn" id="tbToday">今天</button>
+                    <div class="cal-ym-select">
+                        <span id="toolbarYmLabel">2026 年 5 月</span>
+                    </div>
+                </div>
+
+                <div class="cal-body">
+                    <!-- 左侧栏：小日历 + 我的日历 -->
+                    <div class="cal-sidebar">
+                        <!-- 小日历 -->
+                        <div class="cal-sb-section">
+                            <div class="mini-cal-nav">
+                                <button class="mini-cal-nav-btn" onclick="changeMonth(-1)">&#9664;</button>
+                                <span class="mini-cal-nav-label" id="miniCalTitle">2026年5月</span>
+                                <button class="mini-cal-nav-btn" onclick="changeMonth(1)">&#9654;</button>
+                            </div>
+                            <div class="mini-cal-grid" id="miniCalGrid"></div>
+                        </div>
+
+                        <!-- 我的日历 -->
+                        <div class="cal-sb-section">
+                            <div class="cal-sb-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                我的日历
+                            </div>
+                            <div class="my-cal-list">
+                                <div class="my-cal-item">
+                                    <div class="my-cal-checkbox"></div>
+                                    <span>日程</span>
+                                </div>
+                            </div>
+                            <div class="show-all-link">全部显示</div>
+                        </div>
+                    </div>
+
+                    <!-- 主日历 -->
+                    <div class="cal-main">
+                        <!-- 星期头 -->
+                        <div class="cal-week-header" id="weekHeader"></div>
+                        <!-- 日期格子 -->
+                        <div class="cal-date-grid" id="dateGrid"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let calYear, calMonth;
+        let selectedDate = null;
+        let currentView = 'month'; // 'month' | 'week' | 'day' | 'schedule'
+        let holidayCache = {}; // { '2026-05-01': { type: 'holiday', name: '劳动节' }, '2026-04-26': { type: 'work' } }
+        let calendarEvents = {}; // { '2026-05-10': [ { student_name: '张三', event: '迟到', is_positive: false }, ... ] }
+
+        // ========== 节假日数据获取 ==========
+        async function fetchHolidays(year) {
+            try {
+                // 尝试 HTTPS 和 HTTP 两种协议
+                let res;
+                try {
+                    res = await fetch(`https://timor.tech/api/holiday/year/${year}`);
+                } catch (_) {
+                    res = await fetch(`http://timor.tech/api/holiday/year/${year}`);
+                }
+                const data = await res.json();
+                if (data.code === 0 && data.holiday) {
+                    Object.entries(data.holiday).forEach(([md, info]) => {
+                        // 日期可能是 MM-DD 或 YYYY-MM-DD
+                        const fullDate = md.includes('-') && md.length === 5 
+                            ? year + '-' + md 
+                            : md;
+                        if (info.holiday) {
+                            holidayCache[fullDate] = { type: 'holiday', name: info.name || '' };
+                        } else {
+                            holidayCache[fullDate] = { type: 'work' };
+                        }
+                    });
+                    console.log('已获取节假日数据:', Object.keys(holidayCache).length + ' 条');
+                }
+            } catch (e) {
+                console.warn('节假日API获取失败，使用内置备用数据', e.message);
+                // 备用：硬编码 2026 年部分节假日（API不可用时使用）
+                if (year === 2026) {
+                    const backupHolidays = {
+                        '2026-01-01': '元旦', '2026-01-02': '元旦', '2026-01-03': '元旦',
+                        '2026-02-15': '春节', '2026-02-16': '春节', '2026-02-17': '春节',
+                        '2026-02-18': '春节', '2026-02-19': '春节', '2026-02-20': '春节', '2026-02-21': '春节',
+                        '2026-04-04': '清明节', '2026-04-05': '清明节', '2026-04-06': '清明节',
+                        '2026-05-01': '劳动节', '2026-05-02': '劳动节', '2026-05-03': '劳动节',
+                        '2026-05-04': '劳动节', '2026-05-05': '劳动节',
+                        '2026-06-25': '端午节', '2026-06-26': '端午节', '2026-06-27': '端午节',
+                        '2026-10-01': '国庆节', '2026-10-02': '国庆节', '2026-10-03': '国庆节',
+                        '2026-10-04': '国庆节', '2026-10-05': '国庆节', '2026-10-06': '国庆节', '2026-10-07': '国庆节',
+                    };
+                    const backupWorkdays = {
+                        '2026-01-04': true, '2026-02-14': true, '2026-04-03': true,
+                        '2026-04-07': true, '2026-05-09': true, '2026-06-28': true,
+                        '2026-09-26': true, '2026-10-10': true, '2026-10-11': true,
+                    };
+                    Object.entries(backupHolidays).forEach(([date, name]) => {
+                        holidayCache[date] = { type: 'holiday', name };
+                    });
+                    Object.keys(backupWorkdays).forEach(date => {
+                        holidayCache[date] = { type: 'work' };
+                    });
+                    console.log('使用备用节假日数据');
+                }
+            }
+        }
+
+        // ========== 日历事件数据获取 ==========
+
+        async function fetchCalendarEvents(startDate, endDate) {
+            try {
+                const res = await fetch(`/api/beauty-scores/calendar-events?start_date=${startDate}&end_date=${endDate}`);
+                const data = await res.json();
+                if (data.success && data.data) {
+                    calendarEvents = data.data;
+                }
+            } catch (e) {
+                console.warn('获取日历事件失败', e);
+            }
+        }
+
+        // 渲染事件到指定容器
+        function renderEventsToContainer(container, dateStr) {
+            if (!container) return;
+            const events = calendarEvents[dateStr] || [];
+            let html = '';
+            events.forEach(evt => {
+                let cls = '';
+                if (evt.type === 'attendance') {
+                    cls = 'cal-event-chip attendance';
+                } else {
+                    cls = evt.is_positive ? 'cal-event-chip positive' : 'cal-event-chip negative';
+                }
+                const label = (evt.class_name ? '[' + evt.class_name + '] ' : '') + evt.student_name;
+                const title = evt.type === 'attendance' ? `${label}: ${evt.event}` : `${label}: ${evt.event}（${evt.score}分）`;
+                html += `<div class="${cls}" title="${title}">${label} ${evt.event}</div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        // ========== 获取日期类型 ==========
+        function getDayType(dateStr) {
+            // 先查节假日缓存
+            if (holidayCache[dateStr]) {
+                return holidayCache[dateStr].type; // 'holiday' 或 'work'
+            }
+            // 默认：根据星期判断
+            const d = new Date(dateStr);
+            const dow = d.getDay(); // 0=Sun, 6=Sat
+            return (dow === 0 || dow === 6) ? 'weekend' : 'normal';
+        }
+
+        // ========== 获取日期标签（节日名称）==========
+        function getDayLabel(dateStr) {
+            if (holidayCache[dateStr] && holidayCache[dateStr].type === 'holiday') {
+                return holidayCache[dateStr].name;
+            }
+            return '';
+        }
+
+        async function checkAuth() {
+            const res = await fetch('/api/auth/check');
+            const data = await res.json();
+            if (!data.loggedIn) { window.location.href = '/login'; return; }
+            
+            document.getElementById('userAvatar').textContent = data.user.name.charAt(0);
+            const roleMap = { admin: '系统管理员', teacher: '班主任', student: '学生', class: '班级' };
+            document.getElementById('userName').textContent = data.user.name + ' ' + (roleMap[data.user.role] || '');
+            localStorage.setItem('sidebarUserAvatar', data.user.name.charAt(0));
+            localStorage.setItem('sidebarUserName', data.user.name + ' ' + (roleMap[data.user.role] || ''));
+            if (data.user.role === 'class') {
+                // 班级账号不允许访问事件页面，重定向到总表
+                window.location.href = '/total-table';
+                return;
+            }
+        }
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login';
+        }
+        function toggleSubMenu(el) {
+            el.classList.toggle('expanded');
+            const sub = el.nextElementSibling;
+            if (sub) sub.classList.toggle('expanded');
+        }
+
+        // ========== 视图切换 ==========
+        async function switchView(view) {
+            currentView = view;
+            document.querySelectorAll('.cal-tb-btn').forEach(b => b.classList.remove('active'));
+            const btnMap = { month: 'tbMonth', week: 'tbWeek', day: 'tbDay', schedule: 'tbSchedule' };
+            const btn = document.getElementById(btnMap[view]);
+            if (btn) btn.classList.add('active');
+            await renderAll();
+        }
+
+        // ========== 渲染小日历 ==========
+        function renderMiniCal() {
+            const grid = document.getElementById('miniCalGrid');
+            document.getElementById('miniCalTitle').textContent = calYear + '年' + (calMonth + 1) + '月';
+            const now = new Date();
+            const today = now.getFullYear() === calYear && now.getMonth() === calMonth ? now.getDate() : 0;
+            let firstDow = new Date(calYear, calMonth, 1).getDay();
+            firstDow = firstDow === 0 ? 6 : firstDow - 1;
+            const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+            const prevDays = new Date(calYear, calMonth, 0).getDate();
+            let html = '';
+            ['一','二','三','四','五','六','日'].forEach(d => { html += `<div class="mini-cal-wd">${d}</div>`; });
+            for (let i = firstDow - 1; i >= 0; i--) html += `<div class="mini-cal-day other-month">${prevDays - i}</div>`;
+            for (let d = 1; d <= daysInMonth; d++) {
+                const isToday = d === today;
+                const dateStr = calYear + '-' + String(calMonth+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+                const dayType = getDayType(dateStr);
+                let dayCls = 'mini-cal-day';
+                if (isToday) dayCls += ' today';
+                if (dayType === 'holiday') dayCls += ' holiday';
+                else if (dayType === 'weekend') dayCls += ' weekend';
+                else if (dayType === 'work') dayCls += ' workday'; // 调休工作日
+                if (selectedDate && selectedDate.getFullYear()===calYear && selectedDate.getMonth()===calMonth && selectedDate.getDate()===d && !isToday) dayCls += ' selected';
+                html += `<div class="${dayCls}" onclick="onMiniDayClick(${d})">${d}</div>`;
+            }
+            const totalCells = firstDow + daysInMonth;
+            const remaining = totalCells <= 35 ? 35 - totalCells : 42 - totalCells;
+            for (let d = 1; d <= remaining; d++) html += `<div class="mini-cal-day other-month">${d}</div>`;
+            grid.innerHTML = html;
+        }
+
+        // ========== 获取当前视图的日期范围 ==========
+        function getViewRange() {
+            const base = selectedDate ? new Date(selectedDate) : new Date();
+            if (currentView === 'month') {
+                const y = base.getFullYear(), m = base.getMonth();
+                return { type: 'month', year: y, month: m, start: new Date(y, m, 1), end: new Date(y, m + 1, 0) };
+            } else if (currentView === 'week') {
+                const d = new Date(base);
+                const day = d.getDay(); // 0=Sun
+                const monOffset = day === 0 ? -6 : 1 - day; // 回到周一
+                d.setDate(d.getDate() + monOffset);
+                const start = new Date(d);
+                const end = new Date(d);
+                end.setDate(end.getDate() + 6);
+                return { type: 'week', start, end };
+            } else { // day
+                const d = new Date(base);
+                return { type: 'day', start: d, end: d };
+            }
+        }
+
+        // ========== 渲染主视图 ==========
+        async function renderMainCal() {
+            const range = getViewRange();
+            const whEl = document.getElementById('weekHeader');
+            const grid = document.getElementById('dateGrid');
+            const now = new Date();
+            const todayStr = formatDate(now);
+
+            // 先获取可见范围的事件数据
+            const startStr = formatDate(range.start);
+            const endStr = formatDate(range.end);
+            await fetchCalendarEvents(startStr, endStr);
+
+            if (currentView === 'day') {
+                renderDayView(range, whEl, grid, todayStr, now);
+            } else if (currentView === 'week') {
+                renderWeekView(range, whEl, grid, todayStr, now);
+            } else {
+                renderMonthView(range, whEl, grid, todayStr, now);
+            }
+
+            // 渲染完后填充事件
+            fillCellEvents(grid);
+        }
+
+        // 填充每个日期格子里的事件
+        function fillCellEvents(grid) {
+            const cells = grid.querySelectorAll('.cal-cell');
+            cells.forEach(cell => {
+                const dateNumEl = cell.querySelector('.cal-date-num');
+                if (!dateNumEl) return;
+                // 根据格子内容推断日期
+                const parentHtml = grid.innerHTML;
+                const cellIndex = Array.from(cells).indexOf(cell);
+                // 使用 onclick 参数获取日期
+                const onclick = cell.getAttribute('onclick');
+                if (!onclick) return;
+                const match = onclick.match(/onCellClick\((\d+),(\d+),(\d+)\)/);
+                if (!match) return;
+                const y = parseInt(match[1]), m = parseInt(match[2]), d = parseInt(match[3]);
+                const dateStr = y + '-' + String(m+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+                const evtArea = cell.querySelector('.cal-events-area');
+                renderEventsToContainer(evtArea, dateStr);
+            });
+        }
+
+        async function renderAll() {
+            renderMiniCal();
+            await renderMainCal();
+            updateToolbarLabel();
+        }
+
+        function updateToolbarLabel() {
+            const range = getViewRange();
+            const s = range.start, e = range.end;
+            if (currentView === 'month') {
+                document.getElementById('toolbarYmLabel').textContent = s.getFullYear() + ' 年 ' + (s.getMonth() + 1) + ' 月';
+            } else if (currentView === 'week') {
+                const sy = s.getFullYear(), ey = e.getFullYear();
+                const sm = s.getMonth() + 1, em = e.getMonth() + 1;
+                const sd = s.getDate(), ed = e.getDate();
+                if (sy === ey && sm === em) {
+                    document.getElementById('toolbarYmLabel').textContent = sy + '年' + sm + '月 ' + sd + '日 - ' + ed + '日';
+                } else if (sy === ey) {
+                    document.getElementById('toolbarYmLabel').textContent = sy + '年' + sm + '月' + sd + '日 - ' + em + '月' + ed + '日';
+                } else {
+                    document.getElementById('toolbarYmLabel').textContent = sy + '/' + sm + '/' + sd + ' - ' + ey + '/' + em + '/' + ed;
+                }
+            } else {
+                document.getElementById('toolbarYmLabel').textContent = s.getFullYear() + '年' + (s.getMonth() + 1) + '月' + s.getDate() + '日';
+            }
+        }
+
+        // ========== 月视图 ==========
+        function renderMonthView(range, whEl, grid, todayStr, now) {
+            // 重置日视图可能修改的样式
+            whEl.style.display = '';
+            grid.style.display = '';
+            grid.style.flexDirection = '';
+            grid.style.gridTemplateColumns = '';
+
+            const year = range.year, month = range.month;
+            whEl.innerHTML = '';
+            ['星期一','星期二','星期三','星期四','星期五','星期六','星期日'].forEach((d, i) => {
+                whEl.innerHTML += `<div class="cal-wh-cell${i>=5?' weekend':''}">${d}</div>`;
+            });
+            let firstDow = new Date(year, month, 1).getDay();
+            firstDow = firstDow === 0 ? 6 : firstDow - 1;
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const prevDays = new Date(year, month, 0).getDate();
+            let html = '';
+            // 上个月
+            for (let i = firstDow - 1; i >= 0; i--) {
+                const day = prevDays - i;
+                const dow = (firstDow - 1 - i + 1) % 7;
+                html += `<div class="cal-cell other-month${dow>=5?' weekend':''}"><span class="cal-date-num">${day}</span><div class="cal-events-area"></div></div>`;
+            }
+            // 当月
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = year + '-' + String(month+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+                const dayType = getDayType(dateStr);
+                const isToday = dateStr === todayStr;
+                const isSelected = selectedDate && dateStr === formatDate(selectedDate);
+                let cls = 'cal-cell';
+                if (dayType === 'holiday' || dayType === 'weekend') cls += ' weekend';
+                if (dayType === 'work') cls += ' workday';
+                if (isToday || (isSelected && !isToday)) cls += ' today-cell';
+                const numCls = 'cal-date-num' + (isToday ? ' today-num' : '');
+                const label = getDayLabel(dateStr);
+                html += `<div class="${cls}" onclick="onCellClick(${year},${month},${d})"><span class="${numCls}">${d}</span>${label ? '<div style="font-size:0.6rem;color:#EF4444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+label+'</div>' : ''}<div class="cal-events-area"></div></div>`;
+            }
+            // 下个月
+            const totalCells = firstDow + daysInMonth;
+            const remaining = totalCells <= 35 ? 35 - totalCells : 42 - totalCells;
+            for (let d = 1; d <= remaining; d++) {
+                const dow = (firstDow + d - 1) % 7;
+                html += `<div class="cal-cell other-month${dow>=5?' weekend':''}"><span class="cal-date-num">${d}</span><div class="cal-events-area"></div></div>`;
+            }
+            grid.innerHTML = html;
+        }
+
+        // ========== 周视图 ==========
+        function renderWeekView(range, whEl, grid, todayStr, now) {
+            // 重置日视图可能修改的样式
+            whEl.style.display = '';
+            grid.style.display = '';
+            grid.style.flexDirection = '';
+
+            const start = new Date(range.start);
+            whEl.innerHTML = '';
+            // 星期头：周一 ~ 周日
+            const weekDays = ['星期一','星期二','星期三','星期四','星期五','星期六','星期日'];
+            let whHtml = '';
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(start);
+                d.setDate(start.getDate() + i);
+                const dateStr = formatDate(d);
+                const isToday = dateStr === todayStr;
+                const isWeekend = i >= 5;
+                // 显示：周一 \n 4/15
+                const label = weekDays[i] + '<br><span style="font-size:1.1rem;font-weight:700;">' + d.getDate() + '/' + (d.getMonth()+1) + '</span>';
+                whHtml += `<div class="cal-wh-cell${isWeekend?' weekend':''}${isToday?' today-num':''}" style="padding:6px 0;line-height:1.4;">${label}</div>`;
+            }
+            whEl.innerHTML = whHtml;
+
+            // 只渲染 7 天的格子
+            let html = '';
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(start);
+                d.setDate(start.getDate() + i);
+                const dateStr = formatDate(d);
+                const isToday = dateStr === todayStr;
+                const dayType = getDayType(dateStr);
+                const isSelected = selectedDate && dateStr === formatDate(selectedDate);
+
+                let cls = 'cal-cell';
+                if (dayType === 'holiday' || dayType === 'weekend') cls += ' weekend';
+                if (dayType === 'work') cls += ' workday';
+                if (isToday || (isSelected && !isToday)) cls += ' today-cell';
+                // 非当前月的日期灰色
+                if (d.getMonth() !== start.getMonth() && d.getMonth() !== (new Date(start.getFullYear(), start.getMonth()+1, 0)).getMonth()) {
+                    cls += ' other-month';
+                }
+
+                const num = d.getDate();
+                const numCls = 'cal-date-num' + (isToday ? ' today-num' : '');
+                const label = getDayLabel(dateStr);
+                html += `<div class="${cls}" onclick="onCellClick(${d.getFullYear()},${d.getMonth()},${d.getDate()})"><span class="${numCls}">${num}</span>${label ? '<div style="font-size:0.6rem;color:#EF4444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+label+'</div>' : ''}<div class="cal-events-area"></div></div>`;
+            }
+            grid.innerHTML = html;
+            grid.style.gridTemplateColumns = 'repeat(7, 1fr)';
+        }
+
+        // ========== 日视图 ==========
+        function renderDayView(range, whEl, grid, todayStr, now) {
+            const date = range.start;
+            const dateStr = formatDate(date);
+            const isToday = dateStr === todayStr;
+            const weekDays = ['日','一','二','三','四','五','六'];
+            const dow = date.getDay();
+
+            // 星期头显示当前日期详情
+            whEl.innerHTML = '';
+            whEl.style.display = 'flex';
+            whEl.style.justifyContent = 'center';
+            whEl.style.alignItems = 'center';
+            whEl.style.padding = '16px 0';
+            whEl.innerHTML = `
+                <div style="text-align:center;">
+                    <div style="font-size:0.9rem;color:#64748b;">星期${weekDays[dow]}</div>
+                    <div style="font-size:2.2rem;font-weight:700;color:#1e293b;margin:4px 0;">${date.getDate()}</div>
+                    <div style="font-size:0.9rem;color:#64748b;">${date.getFullYear()}年${date.getMonth()+1}月</div>
+                </div>
+            `;
+
+            // 日视图：只显示当天事件列表，不显示小时
+            const events = calendarEvents[dateStr] || [];
+            let html = '<div class="day-schedule" style="flex:1;overflow-y:auto;padding:12px 16px;">';
+            if (events.length === 0) {
+                html += '<div style="text-align:center;color:#94a3b8;padding:40px 0;font-size:0.95rem;">当日暂无事件</div>';
+            } else {
+                events.forEach(evt => {
+                    let color, bgColor;
+                    if (evt.type === 'attendance') {
+                        color = '#92400e';
+                        bgColor = '#fef3c7';
+                    } else {
+                        color = evt.is_positive ? '#059669' : '#dc2626';
+                        bgColor = evt.is_positive ? '#dcfce7' : '#fee2e2';
+                    }
+                    html += `
+                        <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:8px;background:${bgColor};border-radius:8px;border-left:4px solid ${color};">
+                            <div style="flex:1;">
+                                <div style="font-weight:600;font-size:0.9rem;color:#1e293b;">${evt.class_name ? '[' + evt.class_name + '] ' : ''}${evt.student_name}</div>
+                                <div style="font-size:0.82rem;color:#64748b;margin-top:2px;">${evt.event}</div>
+                            </div>
+                            ${evt.type !== 'attendance' ? `<div style="font-weight:700;font-size:1.1rem;color:${color};flex-shrink:0;">${evt.is_positive ? '+' : ''}${evt.score}</div>` : ''}
+                        </div>
+                    `;
+                });
+            }
+            html += '</div>';
+            grid.innerHTML = html;
+            grid.style.display = 'flex';
+            grid.style.flexDirection = 'column';
+        }
+
+        // ========== 辅助函数 ==========
+        function formatDate(d) {
+            return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        }
+
+        async function onMiniDayClick(day) {
+            selectedDate = new Date(calYear, calMonth, day);
+            await renderAll();
+        }
+
+        async function onCellClick(y, m, d) {
+            selectedDate = new Date(y, m, d);
+            await renderAll();
+        }
+
+        async function changeMonth(delta) {
+            const prevYear = calYear;
+            if (currentView === 'month') {
+                calMonth += delta;
+                if (calMonth > 11) { calMonth = 0; calYear++; }
+                if (calMonth < 0) { calMonth = 11; calYear--; }
+                selectedDate = new Date(calYear, calMonth, 1);
+            } else if (currentView === 'week') {
+                selectedDate.setDate(selectedDate.getDate() + delta * 7);
+                calYear = selectedDate.getFullYear();
+                calMonth = selectedDate.getMonth();
+            } else {
+                selectedDate.setDate(selectedDate.getDate() + delta);
+                calYear = selectedDate.getFullYear();
+                calMonth = selectedDate.getMonth();
+            }
+            // 年份变化时重新获取节假日数据
+            if (calYear !== prevYear) {
+                await fetchHolidays(calYear);
+            }
+            await renderAll();
+        }
+
+        async function goToday() {
+            const now = new Date();
+            calYear = now.getFullYear();
+            calMonth = now.getMonth();
+            selectedDate = now;
+            await renderAll();
+        }
+
+        (function init() {
+            const now = new Date();
+            calYear = now.getFullYear();
+            calMonth = now.getMonth();
+            selectedDate = now;
+
+            // 视图切换按钮
+            document.getElementById('tbMonth').onclick = () => switchView('month');
+            document.getElementById('tbWeek').onclick = () => switchView('week');
+            document.getElementById('tbDay').onclick = () => switchView('day');
+            document.getElementById('tbSchedule').onclick = () => switchView('month'); // 日程表暂缺，默认月视图
+            document.getElementById('tbToday').onclick = goToday;
+
+            checkAuth().then(() => {
+                renderAll(); // 先显示默认周末标记
+                fetchHolidays(calYear).then(() => renderAll()); // 再获取节假日数据，更新标记
+                if (window.Collab) {
+                    Collab.connect();
+                }
+            });
+        })();
+    
+        function openPasswordModal(){document.getElementById("oldPassword").value="";document.getElementById("newPassword").value="";document.getElementById("confirmPassword").value="";document.getElementById("passwordError").style.display="none";document.getElementById("passwordModal").style.display="flex";}
+        function closeModal(id){document.getElementById(id).style.display="none";}
+        async function changePassword(){var o=document.getElementById("oldPassword").value,n=document.getElementById("newPassword").value,c=document.getElementById("confirmPassword").value,e=document.getElementById("passwordError");if(!o||!n){e.textContent="请填写完整";e.style.display="block";return;}if(n.length<4){e.textContent="新密码至少4位";e.style.display="block";return;}if(n!==c){e.textContent="两次密码不一致";e.style.display="block";return;}try{var r=await fetch("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({old_password:o,new_password:n})});var d=await r.json();if(d.success){closeModal("passwordModal");alert("密码修改成功");}else{e.textContent=d.message||"修改失败";e.style.display="block";}}catch(er){e.textContent="网络错误";e.style.display="block";}}</script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/collab.js"></script>
+    <script>
+    (function() {
+        if (!window.Collab) return;
+        Collab.on('collab_update', function(data) {
+            if (data.docType === 'beauty_scores') {
+                console.log('[美丽学分] 收到协同更新，刷新数据');
+                if (typeof loadScores === 'function') loadScores();
+            }
+        });
+        Collab.on('collab_locked', function(data) {
+            if (data.docType === 'beauty_scores') {
+                showToast(data.lockedBy + ' 正在编辑美丽学分...', 'info');
+            }
+        });
+        Collab.on('collab_unlocked', function(data) {
+            if (data.docType === 'beauty_scores') {
+                showToast(data.unlockedBy + ' 已完成编辑', 'info');
+            }
+        });
+    })();
+    </script>
+
+</body>
+</html>

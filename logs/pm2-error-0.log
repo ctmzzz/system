@@ -1,0 +1,145 @@
+2026-05-19 23:02:36 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:02:36 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:02:36 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:02:46 +08:00: Error: connect ETIMEDOUT
+2026-05-19 23:02:46 +08:00:     at initDatabase (M:\新建文件夹\经管开发\database-mysql.js:34:34)
+2026-05-19 23:02:46 +08:00:     at startServer (M:\新建文件夹\经管开发\server.js:3026:11)
+2026-05-19 23:02:46 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\server.js:3102:1)
+2026-05-19 23:02:46 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:02:46 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10)
+2026-05-19 23:02:46 +08:00:     at Module.load (node:internal/modules/cjs/loader:1533:32)
+2026-05-19 23:02:46 +08:00:     at Module._load (node:internal/modules/cjs/loader:1335:12)
+2026-05-19 23:02:46 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\node_modules\pm2\lib\ProcessContainerFork.js:33:23)
+2026-05-19 23:02:46 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:02:46 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10) {
+2026-05-19 23:02:46 +08:00:   errorno: 'ETIMEDOUT',
+2026-05-19 23:02:46 +08:00:   code: 'ETIMEDOUT',
+2026-05-19 23:02:46 +08:00:   syscall: 'connect',
+2026-05-19 23:02:46 +08:00:   fatal: true
+2026-05-19 23:02:46 +08:00: }
+2026-05-19 23:02:49 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:02:49 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:02:49 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:03:20 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:03:20 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:03:20 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:03:30 +08:00: Error: connect ETIMEDOUT
+2026-05-19 23:03:30 +08:00:     at initDatabase (M:\新建文件夹\经管开发\database-mysql.js:34:34)
+2026-05-19 23:03:30 +08:00:     at startServer (M:\新建文件夹\经管开发\server.js:3026:11)
+2026-05-19 23:03:30 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\server.js:3102:1)
+2026-05-19 23:03:30 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:03:30 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10)
+2026-05-19 23:03:30 +08:00:     at Module.load (node:internal/modules/cjs/loader:1533:32)
+2026-05-19 23:03:30 +08:00:     at Module._load (node:internal/modules/cjs/loader:1335:12)
+2026-05-19 23:03:30 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\node_modules\pm2\lib\ProcessContainerFork.js:33:23)
+2026-05-19 23:03:30 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:03:30 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10) {
+2026-05-19 23:03:30 +08:00:   errorno: 'ETIMEDOUT',
+2026-05-19 23:03:30 +08:00:   code: 'ETIMEDOUT',
+2026-05-19 23:03:30 +08:00:   syscall: 'connect',
+2026-05-19 23:03:30 +08:00:   fatal: true
+2026-05-19 23:03:30 +08:00: }
+2026-05-19 23:03:32 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:03:32 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:03:32 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:03:42 +08:00: Error: connect ETIMEDOUT
+2026-05-19 23:03:42 +08:00:     at initDatabase (M:\新建文件夹\经管开发\database-mysql.js:34:34)
+2026-05-19 23:03:42 +08:00:     at startServer (M:\新建文件夹\经管开发\server.js:3026:11)
+2026-05-19 23:03:42 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\server.js:3102:1)
+2026-05-19 23:03:42 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:03:42 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10)
+2026-05-19 23:03:42 +08:00:     at Module.load (node:internal/modules/cjs/loader:1533:32)
+2026-05-19 23:03:42 +08:00:     at Module._load (node:internal/modules/cjs/loader:1335:12)
+2026-05-19 23:03:42 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\node_modules\pm2\lib\ProcessContainerFork.js:33:23)
+2026-05-19 23:03:42 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:03:42 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10) {
+2026-05-19 23:03:42 +08:00:   errorno: 'ETIMEDOUT',
+2026-05-19 23:03:42 +08:00:   code: 'ETIMEDOUT',
+2026-05-19 23:03:42 +08:00:   syscall: 'connect',
+2026-05-19 23:03:42 +08:00:   fatal: true
+2026-05-19 23:03:42 +08:00: }
+2026-05-19 23:03:44 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:03:44 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:03:44 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:03:54 +08:00: Error: connect ETIMEDOUT
+2026-05-19 23:03:54 +08:00:     at initDatabase (M:\新建文件夹\经管开发\database-mysql.js:34:34)
+2026-05-19 23:03:54 +08:00:     at startServer (M:\新建文件夹\经管开发\server.js:3026:11)
+2026-05-19 23:03:54 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\server.js:3102:1)
+2026-05-19 23:03:54 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:03:54 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10)
+2026-05-19 23:03:54 +08:00:     at Module.load (node:internal/modules/cjs/loader:1533:32)
+2026-05-19 23:03:54 +08:00:     at Module._load (node:internal/modules/cjs/loader:1335:12)
+2026-05-19 23:03:54 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\node_modules\pm2\lib\ProcessContainerFork.js:33:23)
+2026-05-19 23:03:54 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:03:54 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10) {
+2026-05-19 23:03:54 +08:00:   errorno: 'ETIMEDOUT',
+2026-05-19 23:03:54 +08:00:   code: 'ETIMEDOUT',
+2026-05-19 23:03:54 +08:00:   syscall: 'connect',
+2026-05-19 23:03:54 +08:00:   fatal: true
+2026-05-19 23:03:54 +08:00: }
+2026-05-19 23:03:57 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:03:57 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:03:57 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:04:07 +08:00: Error: connect ETIMEDOUT
+2026-05-19 23:04:07 +08:00:     at initDatabase (M:\新建文件夹\经管开发\database-mysql.js:34:34)
+2026-05-19 23:04:07 +08:00:     at startServer (M:\新建文件夹\经管开发\server.js:3026:11)
+2026-05-19 23:04:07 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\server.js:3102:1)
+2026-05-19 23:04:07 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:04:07 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10)
+2026-05-19 23:04:07 +08:00:     at Module.load (node:internal/modules/cjs/loader:1533:32)
+2026-05-19 23:04:07 +08:00:     at Module._load (node:internal/modules/cjs/loader:1335:12)
+2026-05-19 23:04:07 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\node_modules\pm2\lib\ProcessContainerFork.js:33:23)
+2026-05-19 23:04:07 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:04:07 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10) {
+2026-05-19 23:04:07 +08:00:   errorno: 'ETIMEDOUT',
+2026-05-19 23:04:07 +08:00:   code: 'ETIMEDOUT',
+2026-05-19 23:04:07 +08:00:   syscall: 'connect',
+2026-05-19 23:04:07 +08:00:   fatal: true
+2026-05-19 23:04:07 +08:00: }
+2026-05-19 23:04:26 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:04:26 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:04:26 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:04:36 +08:00: Error: connect ETIMEDOUT
+2026-05-19 23:04:36 +08:00:     at initDatabase (M:\新建文件夹\经管开发\database-mysql.js:34:34)
+2026-05-19 23:04:36 +08:00:     at startServer (M:\新建文件夹\经管开发\server.js:3026:11)
+2026-05-19 23:04:36 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\server.js:3102:1)
+2026-05-19 23:04:36 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:04:36 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10)
+2026-05-19 23:04:36 +08:00:     at Module.load (node:internal/modules/cjs/loader:1533:32)
+2026-05-19 23:04:36 +08:00:     at Module._load (node:internal/modules/cjs/loader:1335:12)
+2026-05-19 23:04:36 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\node_modules\pm2\lib\ProcessContainerFork.js:33:23)
+2026-05-19 23:04:36 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:04:36 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10) {
+2026-05-19 23:04:36 +08:00:   errorno: 'ETIMEDOUT',
+2026-05-19 23:04:36 +08:00:   code: 'ETIMEDOUT',
+2026-05-19 23:04:36 +08:00:   syscall: 'connect',
+2026-05-19 23:04:36 +08:00:   fatal: true
+2026-05-19 23:04:36 +08:00: }
+2026-05-19 23:07:36 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:07:36 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:07:36 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:07:46 +08:00: Error: connect ETIMEDOUT
+2026-05-19 23:07:46 +08:00:     at initDatabase (M:\新建文件夹\经管开发\database-mysql.js:34:34)
+2026-05-19 23:07:46 +08:00:     at startServer (M:\新建文件夹\经管开发\server.js:3026:11)
+2026-05-19 23:07:46 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\server.js:3102:1)
+2026-05-19 23:07:46 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:07:46 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10)
+2026-05-19 23:07:46 +08:00:     at Module.load (node:internal/modules/cjs/loader:1533:32)
+2026-05-19 23:07:46 +08:00:     at Module._load (node:internal/modules/cjs/loader:1335:12)
+2026-05-19 23:07:46 +08:00:     at Object.<anonymous> (M:\新建文件夹\经管开发\node_modules\pm2\lib\ProcessContainerFork.js:33:23)
+2026-05-19 23:07:46 +08:00:     at Module._compile (node:internal/modules/cjs/loader:1812:14)
+2026-05-19 23:07:46 +08:00:     at Object..js (node:internal/modules/cjs/loader:1943:10) {
+2026-05-19 23:07:46 +08:00:   errorno: 'ETIMEDOUT',
+2026-05-19 23:07:46 +08:00:   code: 'ETIMEDOUT',
+2026-05-19 23:07:46 +08:00:   syscall: 'connect',
+2026-05-19 23:07:46 +08:00:   fatal: true
+2026-05-19 23:07:46 +08:00: }
+2026-05-19 23:07:48 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:07:48 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:07:48 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:09:16 +08:00: Warning: connect.session() MemoryStore is not
+2026-05-19 23:09:16 +08:00: designed for a production environment, as it will leak
+2026-05-19 23:09:16 +08:00: memory, and will not scale past a single process.
+2026-05-19 23:09:16 +08:00: Ignoring invalid configuration option passed to Connection: acquireTimeout. This is currently a warning, but in future versions of MySQL2, an error will be thrown if you pass an invalid configuration option to a Connection
+2026-05-19 23:09:16 +08:00: Ignoring invalid configuration option passed to Connection: timeout. This is currently a warning, but in future versions of MySQL2, an error will be thrown if you pass an invalid configuration option to a Connection
+2026-05-19 23:09:16 +08:00: Ignoring invalid configuration option passed to Connection: reconnect. This is currently a warning, but in future versions of MySQL2, an error will be thrown if you pass an invalid configuration option to a Connection

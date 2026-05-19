@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>详细汇总 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    
+    <style>
+        .user-info.show { opacity:1; }
+    </style>
+    <style>
+        .da-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 30px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+        }
+        .da-header h1 { font-size: 1.8rem; margin-bottom: 20px; }
+        .da-controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .da-controls select {
+            padding: 10px 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            min-width: 200px;
+        }
+        .da-controls select option { color: var(--text-primary); }
+        .da-controls select:focus { border-color: white; outline: none; }
+        .da-info {
+            display: flex;
+            gap: 20px;
+            background: rgba(255,255,255,0.15);
+            padding: 12px 24px;
+            border-radius: 10px;
+        }
+        .da-info-item { display: flex; flex-direction: column; }
+        .da-info-label { font-size: 0.85rem; opacity: 0.8; }
+        .da-info-value { font-size: 1.1rem; font-weight: 600; }
+        .chart-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .detail-chart-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+        .detail-chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .detail-chart-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .detail-chart-body { height: 340px; }
+        .da-empty {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 1.2rem;
+            padding: 120px 0;
+        }
+        
+        .homework-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e2e8f0;
+            background: #f8fafc;
+            margin-bottom: 8px;
+            border-radius: 8px;
+        }
+        .homework-item:last-child {
+            margin-bottom: 0;
+        }
+        .homework-left {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .homework-date {
+            font-size: 13px;
+            color: #64748b;
+        }
+        .homework-subject {
+            font-size: 15px;
+            font-weight: 600;
+            color: #1e1b4b;
+        }
+        .homework-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .status-submitted {
+            background: #dcfce7;
+            color: #16a34a;
+        }
+        .status-unsubmitted {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        .status-late {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        .homework-empty {
+            text-align: center;
+            color: #94a3b8;
+            padding: 40px 0;
+            font-size: 14px;
+        }
+        .detail-chart-card.full-width { grid-column: 1 / -1; }
+        @media (max-width: 1024px) {
+            .chart-grid { grid-template-columns: 1fr; }
+        }
+        #printBtn.print-btn-busy { opacity: 0.65; cursor: wait; }
+    </style>
+</head>
+<body>
+    <script>
+    (function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/api/auth/check', false);
+        xhr.send();
+        if (xhr.status === 200) {
+            var data = JSON.parse(xhr.responseText);
+            if (data.loggedIn && data.user.role === 'student') {
+                var s = document.createElement('style');
+                s.textContent = '#navDataManage,#navMeiliXuefen,#navAttendance,#navHomework{display:none!important}';
+                document.head.appendChild(s);
+            }
+            if (data.loggedIn && data.user.role === 'teacher') {
+                var s2 = document.createElement('style');
+                s2.textContent = '#navPeriodStats{display:none!important}';
+                document.head.appendChild(s2);
+            }
+        }
+    })();
+    </script>
+    <div class="main-layout">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                <span>成绩分析</span>
+            </div>
+            
+            <!-- 导航菜单 -->
+            <nav class="nav-menu">
+                <a href="/dashboard" class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                    成绩分析
+                </a>
+                <a href="/detail-analysis" class="nav-item active">
+                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1-5-5-7-7 2-2 2-6 7-6-6 3-5 10 0 13z"/><path d="M21 12c0 4.97-4.03 9-9 9-2.39 0-4.57-.94-6.18-2.47 2.86 1.43 6.86 1.78 9.18-1.53 2.61-3.73 1.27-8.47 0-10 2.7 1.53 6 4.04 6 9z"/></svg>
+                    详细汇总
+                </a>
+                <a href="/period-stats" class="nav-item" id="navPeriodStats">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
+                    周期统计
+                </a>
+                <div class="nav-group" id="navMeiliXuefen">
+                    <div class="nav-parent" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        美丽学分
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub">
+                        <li><a href="/events" class="nav-item">事件</a></li>
+                        <li><a href="/total-table" class="nav-item">总表</a></li>
+                    </ul>
+                </div>
+                <a href="/attendance" class="nav-item" id="navAttendance">
+                    <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                    考勤表
+                </a>
+                <div class="nav-group" id="navHomework">
+                    <div class="nav-parent" onclick="toggleSubMenu(this)">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        作业管理
+                        <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                    </div>
+                    <ul class="nav-sub">
+                        <li><a href="/homework-data" class="nav-item">数据</a></li>
+                        <li><a href="/homework-manage" class="nav-item">管理</a></li>
+                    </ul>
+                </div>
+                <a href="/teacher-admin" class="nav-item" id="navDataManage">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    数据管理
+                </a>
+            </nav>
+            
+                    <script>
+        (function restoreSidebarUser(){const avatar=localStorage.getItem('sidebarUserAvatar');const name=localStorage.getItem('sidebarUserName');const avEl=document.getElementById('userAvatar');const nmEl=document.getElementById('userName');if(avatar&&avEl)avEl.textContent=avatar;if(name&&nmEl)nmEl.textContent=name;})();
+    </script>
+            <div class="sidebar-footer">
+                <div class="user-info" style="cursor:pointer;" onclick="openPasswordModal()">
+                    <div class="user-avatar" id="userAvatar"></div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName"></div>
+                        <div style="font-size:0.7rem;color:#94a3b8;">点击修改密码</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()" style="margin-top: 15px; width: 100%;">退出登录</button>
+            </div>
+        </aside>
+        <!-- 修改密码弹窗 -->
+        <div class="modal-overlay" id="passwordModal" style="display:none;">
+            <div class="modal" style="max-width:360px;">
+                <div class="modal-header">
+                    <h2 class="modal-title">修改密码</h2>
+                    <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+                </div>
+                <div class="modal-form" style="padding:20px;">
+                    <div class="form-group"><label>当前密码</label><input type="password" id="oldPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入当前密码"></div>
+                    <div class="form-group" style="margin-top:12px;"><label>新密码</label><input type="password" id="newPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入新密码（至少4位）"></div>
+                    <div class="form-group" style="margin-top:12px;"><label>确认新密码</label><input type="password" id="confirmPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="再次输入新密码"></div>
+                    <div id="passwordError" style="color:#DC2626;font-size:0.85rem;margin-top:8px;display:none;"></div>
+                    <div class="modal-actions" style="margin-top:16px;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('passwordModal')">取消</button>
+                        <button type="button" class="btn btn-primary" onclick="changePassword()">确认修改</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    <!-- 公告横幅 -->
+    <!-- 公告滚动横幅 -->
+    <div id="announcementBanner" style="display:none;background:linear-gradient(90deg,#4F46E5,#7C3AED,#4F46E5);color:#fff;padding:8px 0;overflow:hidden;position:relative;z-index:9000;">
+        <div id="announcementScroll" style="display:inline-block;white-space:nowrap;animation:annScroll 20s linear infinite;">
+        </div>
+    </div>
+    <style>
+        @keyframes annScroll {
+            0% { transform: translateX(100vw); }
+            100% { transform: translateX(-100%); }
+        }
+    </style>
+<main class="main-content">
+            <div class="page-content">
+                <div id="teacherDAView">
+                <div class="da-header">
+                    <h1>详细汇总</h1>
+                    <div class="da-controls">
+                        <select id="classSelect">
+                            <option value="">请选择班级</option>
+                        </select>
+                        <select id="studentSelect" disabled>
+                            <option value="">请先选择班级</option>
+                        </select>
+                        <select id="subjectSelect" disabled style="display:none;">
+                            <option value="">全部学科</option>
+                        </select>
+                        <div class="da-info" id="studentInfo" style="display:none;">
+                            <div class="da-info-item">
+                                <span class="da-info-label">学生</span>
+                                <span class="da-info-value" id="infoStudentName">-</span>
+                            </div>
+                            <div class="da-info-item">
+                                <span class="da-info-label">班级</span>
+                                <span class="da-info-value" id="infoClassName">-</span>
+                            </div>
+                        </div>
+                        <button id="printBtn" type="button" class="btn btn-secondary" onclick="printDetail()" style="margin-left:10px;" title="图表动画加载完成后即可打印">打印</button>
+                    </div>
+                </div>
+                
+                <!-- 未交作业统计折线图 -->
+                <div id="homeworkChartSection" style="margin-top: 30px; display: none;">
+                    <div class="detail-chart-card full-width">
+                        <div class="detail-chart-header">
+                            <h3 class="detail-chart-title">作业统计</h3>
+                        </div>
+                        <div class="detail-chart-body" id="homeworkChartContainer" style="height: 300px;">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 作业提交情况 -->
+                <div id="homeworkSection" style="margin-top: 30px; display: none;">
+                    <div class="detail-chart-card full-width">
+                        <div class="detail-chart-header">
+                            <h3 class="detail-chart-title">作业提交情况</h3>
+                        </div>
+                        <div class="homework-container" id="homeworkContainer" style="padding: 10px; max-height: 400px; overflow-y: auto;">
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="chartContainer" style="margin-top: 30px;">
+                    <div class="da-empty">请选择班级和学生在查看详细汇总</div>
+                </div>
+                </div>
+
+                <!-- 学生视角 -->
+                <div id="studentDAView" style="display:none;">
+                <div class="da-header" style="background:linear-gradient(135deg,#059669,#10B981);">
+                    <h1>我的详细汇总</h1>
+                    <div class="da-controls">
+                        <div class="da-info" id="studentDAInfo">
+                            <div class="da-info-item">
+                                <span class="da-info-label">学生</span>
+                                <span class="da-info-value" id="studentDAName">-</span>
+                            </div>
+                            <div class="da-info-item">
+                                <span class="da-info-label">班级</span>
+                                <span class="da-info-value" id="studentDAClass">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 未交作业统计折线图（学生视角） -->
+                <div id="studentHomeworkChartSection" style="margin-top: 30px; display: none;">
+                    <div class="detail-chart-card full-width">
+                        <div class="detail-chart-header">
+                            <h3 class="detail-chart-title">未交作业统计（高一上 - 高三下）</h3>
+                        </div>
+                        <div class="detail-chart-body" id="studentHomeworkChartContainer" style="height: 300px;">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 作业提交情况（学生视角） -->
+                <div id="studentHomeworkSection" style="margin-top: 30px; display: none;">
+                    <div class="detail-chart-card full-width">
+                        <div class="detail-chart-header">
+                            <h3 class="detail-chart-title">作业提交情况</h3>
+                        </div>
+                        <div class="homework-container" id="studentHomeworkContainer" style="padding: 10px; max-height: 400px; overflow-y: auto;">
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="studentDAChartContainer" style="margin-top: 30px;">
+                    <div class="da-empty">加载中...</div>
+                </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/collab.js"></script>
+    <script src="/js/detail-analysis.js?v=5"></script>
+    <script>
+        function toggleSubMenu(el) {
+            el.classList.toggle('expanded');
+            const sub = el.nextElementSibling;
+            if (sub) sub.classList.toggle('expanded');
+        }
+    
+        function openPasswordModal(){document.getElementById("oldPassword").value="";document.getElementById("newPassword").value="";document.getElementById("confirmPassword").value="";document.getElementById("passwordError").style.display="none";document.getElementById("passwordModal").style.display="flex";}
+        function closeModal(id){document.getElementById(id).style.display="none";}
+        async function changePassword(){var o=document.getElementById("oldPassword").value,n=document.getElementById("newPassword").value,c=document.getElementById("confirmPassword").value,e=document.getElementById("passwordError");if(!o||!n){e.textContent="请填写完整";e.style.display="block";return;}if(n.length<4){e.textContent="新密码至少4位";e.style.display="block";return;}if(n!==c){e.textContent="两次密码不一致";e.style.display="block";return;}try{var r=await fetch("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({old_password:o,new_password:n})});var d=await r.json();if(d.success){closeModal("passwordModal");alert("密码修改成功");}else{e.textContent=d.message||"修改失败";e.style.display="block";}}catch(er){e.textContent="网络错误";e.style.display="block";}}</script>
+
+</body>
+</html>
