@@ -42,6 +42,20 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+function getTopOverlayZIndex() {
+    return Array.from(document.querySelectorAll('.modal-overlay.show, .warning-modal-overlay'))
+        .reduce((max, el) => {
+            const zIndex = Number.parseInt(window.getComputedStyle(el).zIndex, 10);
+            return Number.isNaN(zIndex) ? max : Math.max(max, zIndex);
+        }, 9999);
+}
+
+function appendTopOverlay(modal) {
+    modal.style.zIndex = String(getTopOverlayZIndex() + 10);
+    document.body.appendChild(modal);
+    return modal;
+}
+
 // 当前编辑的ID
 let editingClassId = null;
 let editingStudentId = null;
@@ -59,7 +73,10 @@ const EXAM_ORDER = [
 
 // 模态框操作
 function openModal(id) {
-    document.getElementById(id).classList.add('show');
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.style.removeProperty('display');
+    modal.classList.add('show');
     if (id === 'studentModal' || id === 'batchStudentModal') {
         loadClassesForSelect();
     }
@@ -75,18 +92,21 @@ function openModal(id) {
 }
 
 function closeModal(id) {
-    document.getElementById(id).classList.remove('show');
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.classList.remove('show');
+    modal.style.removeProperty('display');
     if (id === 'studentModal') {
         document.getElementById('editStudentId').value = '';
         document.getElementById('studentId').value = '';
         document.getElementById('studentName').value = '';
         document.getElementById('studentClass').value = '';
         editingStudentId = null;
-        document.querySelector('.modal-title').textContent = '添加学生';
+        document.querySelector('#studentModal .modal-title').textContent = '添加学生';
     }
     if (id === 'classModal') {
         document.getElementById('className').value = '';
-        document.querySelector('.modal-title').textContent = '添加班级';
+        document.querySelector('#classModal .modal-title').textContent = '添加班级';
         editingClassId = null;
     }
     if (id === 'scoreModal') {
@@ -105,7 +125,7 @@ function closeModal(id) {
         document.getElementById('scoreClass').disabled = false;
         document.getElementById('scoreStudent').disabled = false;
         editingScoreId = null;
-        document.querySelector('.modal-title').textContent = '添加成绩';
+        document.querySelector('#scoreModal .modal-title').textContent = '添加成绩';
     }
     if (id === 'batchScoreModal') {
         resetBatchScoreImport();
@@ -118,22 +138,30 @@ function closeModal(id) {
 // 标签页切换
 // 切换标签页
 function switchTab(tabName) {
-    localStorage.setItem('activeTab', tabName);
+    const normalizedTab = tabName === 'scores' ? 'exams' : tabName;
+    const tabContent = document.getElementById(`tab-${normalizedTab}`);
+    if (!tabContent) {
+        localStorage.setItem('activeTab', 'classes');
+        switchTab('classes');
+        return;
+    }
+
+    localStorage.setItem('activeTab', normalizedTab);
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    const activeBtn = document.querySelector(`.tab-btn[data-tab="${normalizedTab}"]`);
     if (activeBtn) {
         activeBtn.classList.add('active');
     }
-    document.getElementById(`tab-${tabName}`).classList.add('active');
+    tabContent.classList.add('active');
     
     // 切换后自动刷新对应的数据
-    if (tabName === 'classes') {
+    if (normalizedTab === 'classes') {
         loadClasses();
-    } else if (tabName === 'students') {
+    } else if (normalizedTab === 'students') {
         loadStudents();
         loadClassesForSelect();
-    } else if (tabName === 'scores') {
+    } else if (normalizedTab === 'exams') {
         refreshScoresTab();
     }
 }
@@ -207,20 +235,28 @@ async function loadClassesForSelect() {
 function editClass(id, name) {
     editingClassId = id;
     document.getElementById('className').value = name;
-    document.querySelector('.modal-title').textContent = '编辑班级';
+    document.querySelector('#classModal .modal-title').textContent = '编辑班级';
     openModal('classModal');
 }
 
 // 保存班级
 async function saveClass(e) {
     e.preventDefault();
-    const name = document.getElementById('className').value;
+    const editId = editingClassId;
+    const isEdit = editId !== null;
+    const name = document.getElementById('className').value.trim();
+    closeModal('classModal');
+
+    if (!name) {
+        showWarningModal('请输入班级名称');
+        return false;
+    }
 
     try {
         let res, data;
-        if (editingClassId !== null) {
+        if (isEdit) {
             // 更新班级
-            res = await fetch(`/api/classes/${editingClassId}`, {
+            res = await fetch(`/api/classes/${editId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name })
@@ -228,7 +264,6 @@ async function saveClass(e) {
             data = await res.json();
             if (data.success) {
                 showToast('修改成功', 'success');
-                closeModal('classModal');
                 loadClasses();
             } else {
                 if (data.message && data.message.includes('班级名称已存在')) {
@@ -247,7 +282,6 @@ async function saveClass(e) {
             data = await res.json();
             if (data.success) {
                 showToast('添加成功', 'success');
-                closeModal('classModal');
                 loadClasses();
             } else {
                 if (data.code === 'SAME_USER_DUPLICATE') {
@@ -269,7 +303,7 @@ async function saveClass(e) {
                         </div>
                     </div>
                 `;
-                document.body.appendChild(modal);
+                appendTopOverlay(modal);
                 } else {
                     showToast(data.message || '添加失败', 'error');
                 }
@@ -278,6 +312,7 @@ async function saveClass(e) {
     } catch (err) {
         showToast('操作失败', 'error');
     }
+    return false;
 }
 
 // 强制创建班级（忽略其他账号创建的重复）
@@ -331,7 +366,7 @@ async function deleteClass(id) {
             </div>
         </div>
     `;
-    document.body.appendChild(modal);
+    appendTopOverlay(modal);
 }
 
 async function confirmDeleteClass(id, btnEl) {
@@ -447,8 +482,7 @@ async function batchDeleteStudents() {
     const ids = Array.from(checked).map(cb => parseInt(cb.value));
 
     // 显示加载弹窗
-    const loadingModal = createLoadingModal('正在删除学生...', `正在删除 ${ids.length} 名学生，请稍候`);
-    document.body.appendChild(loadingModal);
+    const loadingModal = appendTopOverlay(createLoadingModal('正在删除学生...', `正在删除 ${ids.length} 名学生，请稍候`));
 
     try {
         const res = await fetch('/api/students/batch-delete', {
@@ -493,7 +527,7 @@ function showWarningModal(message) {
             </div>
         </div>
     `;
-    document.body.appendChild(modal);
+    appendTopOverlay(modal);
 }
 
 // 编辑学生
@@ -511,24 +545,30 @@ function editStudent(id, studentId, name, classId) {
 async function saveStudent(e) {
     e.preventDefault();
     const editId = document.getElementById('editStudentId').value;
+    const isEdit = !!editId;
     const student_id = document.getElementById('studentId').value.trim();
     const name = document.getElementById('studentName').value.trim();
     const class_id = document.getElementById('studentClass').value;
+    closeModal('studentModal');
+
+    if (!student_id || !name || !class_id) {
+        showWarningModal('请填写完整学生信息');
+        return false;
+    }
 
     // 学号必须为10位数字
     if (!/^\d{10}$/.test(student_id)) {
-        showToast('学号必须为10位数字', 'error');
-        return;
+        showWarningModal('学号必须为10位数字');
+        return false;
     }
 
     // 班级必选
     if (!class_id) {
-        showToast('请选择班级', 'error');
-        return;
+        showWarningModal('请选择班级');
+        return false;
     }
 
     try {
-        const isEdit = !!editId;
         const res = await fetch(isEdit ? `/api/students/${editId}` : '/api/students', {
             method: isEdit ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -537,7 +577,6 @@ async function saveStudent(e) {
         const data = await res.json();
         if (data.success) {
             showToast(isEdit ? '修改成功' : '添加成功', 'success');
-            closeModal('studentModal');
             document.getElementById('studentModal').style.animation = 'none';
             loadStudents();
         } else {
@@ -550,6 +589,7 @@ async function saveStudent(e) {
     } catch (err) {
         showToast('操作失败', 'error');
     }
+    return false;
 }
 
 // 批量导入学生
@@ -598,7 +638,7 @@ async function batchImportStudents() {
                     </div>
                 </div>
             `;
-            document.body.appendChild(modal);
+            appendTopOverlay(modal);
         } else {
             // 全部成功：显示成功弹窗
             const resultModal = document.createElement('div');
@@ -619,7 +659,7 @@ async function batchImportStudents() {
                     </div>
                 </div>
             `;
-            document.body.appendChild(resultModal);
+            appendTopOverlay(resultModal);
         }
     } catch (err) {
         showToast('导入失败', 'error');
@@ -928,8 +968,7 @@ async function batchDeleteScores() {
     const ids = Array.from(checked).map(cb => parseInt(cb.value));
 
     // 显示加载弹窗
-    const loadingModal = createLoadingModal('正在删除成绩...', `正在删除 ${ids.length} 条成绩，请稍候`);
-    document.body.appendChild(loadingModal);
+    const loadingModal = appendTopOverlay(createLoadingModal('正在删除成绩...', `正在删除 ${ids.length} 条成绩，请稍候`));
 
     try {
         const res = await fetch('/api/scores/batch-delete', {
@@ -1199,23 +1238,29 @@ async function saveScore(e) {
     const editId = document.getElementById('editScoreId').value;
     const isEdit = !!editId;
     // 优先读取可见控件（用户可能修改了），若不可见控件无值则读隐藏字段备
-    const subject = document.getElementById('scoreSubject').value || document.getElementById('editScoreSubject').value;
+    const subject = (document.getElementById('scoreSubject').value || document.getElementById('editScoreSubject').value).trim();
     const exam_id = document.getElementById('scoreExam').value || document.getElementById('editScoreExamId').value;
     const student_id = document.getElementById('scoreStudent').value || document.getElementById('editScoreStudentId').value;
     const scoreType = document.getElementById('scoreSelect').value;
+    const scoreVal = document.getElementById('scoreValue').value;
+    closeModal('scoreModal');
+
+    if (!subject || !exam_id || !student_id) {
+        showWarningModal('请填写完整成绩信息');
+        return false;
+    }
 
     if (!scoreType) {
-        showToast('请选择分数类型', 'error');
-        return;
+        showWarningModal('请选择分数类型');
+        return false;
     }
 
     let total_score;
     if (scoreType === '分数') {
-        const scoreVal = document.getElementById('scoreValue').value;
         const score = parseFloat(scoreVal);
         if (isNaN(score) || score < 0 || score > 100) {
-            showToast('分数必须在0-100之间', 'error');
-            return;
+            showWarningModal('分数必须在0-100之间');
+            return false;
         }
         total_score = score;
     } else {
@@ -1231,14 +1276,14 @@ async function saveScore(e) {
         const data = await res.json();
         if (data.success) {
             showToast(data.message || (isEdit ? '修改成功' : '添加成功'), 'success');
-            closeModal('scoreModal');
             loadExams();
         } else {
-            showToast(data.message || (isEdit ? '修改失败' : '添加失败'), 'error');
+            showWarningModal(data.message || (isEdit ? '修改失败' : '添加失败'));
         }
     } catch (err) {
         showToast('操作失败', 'error');
     }
+    return false;
 }
 
 // 删除成绩
@@ -1448,8 +1493,7 @@ async function batchImportScores() {
     }
 
     // 显示加载弹窗
-    const loadingModal = createLoadingModal('正在导入成绩...', `共 ${parsedScores.length} 条数据，请稍候`);
-    document.body.appendChild(loadingModal);
+    const loadingModal = appendTopOverlay(createLoadingModal('正在导入成绩...', `共 ${parsedScores.length} 条数据，请稍候`));
 
     try {
         const res = await fetch('/api/scores/batch', {
@@ -1514,7 +1558,7 @@ function showCompleteModal(title, message) {
             <button class="btn btn-primary" onclick="this.closest('.warning-modal-overlay').remove()" style="min-width:100px;">确定</button>
         </div>
     `;
-    document.body.appendChild(modal);
+    appendTopOverlay(modal);
 }
 
 // 通用确认弹窗（返回 Promise<boolean>）
@@ -1538,7 +1582,7 @@ function confirmDeleteDialog(message, subMessage) {
                 </div>
             </div>
         `;
-        document.body.appendChild(modal);
+        appendTopOverlay(modal);
 
         const checkInterval = setInterval(() => {
             if (!document.body.contains(modal)) {

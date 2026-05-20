@@ -61,11 +61,17 @@ function showWarningModal(message) {
 
 // 模态框控制
 function openModal(id) {
-    document.getElementById(id).classList.add('show');
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.style.removeProperty('display');
+    modal.classList.add('show');
 }
 
 function closeModal(id) {
-    document.getElementById(id).classList.remove('show');
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.classList.remove('show');
+    modal.style.removeProperty('display');
     if (id === 'userModal') {
         editingUserId = null;
         document.querySelector('#userModal .modal-title').textContent = '添加用户';

@@ -115,7 +115,7 @@
             <div class="modal" style="max-width:360px;">
                 <div class="modal-header">
                     <h2 class="modal-title">修改密码</h2>
-                    <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+                    <button class="modal-close" onclick="closePasswordModal('passwordModal')">✕</button>
                 </div>
                 <div class="modal-form" style="padding:20px;">
                     <div class="form-group"><label>当前密码</label><input type="password" id="oldPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="输入当前密码"></div>
@@ -123,7 +123,7 @@
                     <div class="form-group" style="margin-top:12px;"><label>确认新密码</label><input type="password" id="confirmPassword" style="width:100%;padding:10px 12px;border:2px solid var(--border-color);border-radius:8px;font-size:0.95rem;" placeholder="再次输入新密码"></div>
                     <div id="passwordError" style="color:#DC2626;font-size:0.85rem;margin-top:8px;display:none;"></div>
                     <div class="modal-actions" style="margin-top:16px;">
-                        <button type="button" class="btn btn-secondary" onclick="closeModal('passwordModal')">取消</button>
+                        <button type="button" class="btn btn-secondary" onclick="closePasswordModal('passwordModal')">取消</button>
                         <button type="button" class="btn btn-primary" onclick="changePassword()">确认修改</button>
                     </div>
                 </div>
@@ -291,7 +291,7 @@
                     <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                 </button>
             </div>
-            <form class="modal-form" onsubmit="return saveClass(event)">
+            <form class="modal-form" onsubmit="return saveClass(event)" novalidate>
                 <div class="form-group">
                     <label>班级名称</label>
                     <input type="text" id="className" placeholder="如：高一(1)班" required>
@@ -313,7 +313,7 @@
                     <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                 </button>
             </div>
-            <form class="modal-form" onsubmit="return saveStudent(event)">
+            <form class="modal-form" onsubmit="return saveStudent(event)" novalidate>
                 <input type="hidden" id="editStudentId" value="">
                 <div class="form-group">
                     <label>学号 <span style="font-size:0.75rem;color:#94a3b8;font-weight:400;">（10位数字）</span></label>
@@ -381,7 +381,7 @@
                     <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                 </button>
             </div>
-            <form class="modal-form" onsubmit="return saveScore(event)">
+            <form class="modal-form" onsubmit="return saveScore(event)" novalidate>
                 <input type="hidden" id="editScoreId" value="">
                 <input type="hidden" id="editScoreExamId" value="">
                 <input type="hidden" id="editScoreStudentId" value="">
@@ -475,7 +475,7 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/collab.js"></script>
-    <script src="/js/teacher-admin.js"></script>
+    <script src="/js/teacher-admin.js?v=4"></script>
     <script>
         function toggleSubMenu(el) {
             el.classList.toggle('expanded');
@@ -535,8 +535,8 @@
         });
     
         function openPasswordModal(){document.getElementById("oldPassword").value="";document.getElementById("newPassword").value="";document.getElementById("confirmPassword").value="";document.getElementById("passwordError").style.display="none";document.getElementById("passwordModal").style.display="flex";}
-        function closeModal(id){document.getElementById(id).style.display="none";}
-        async function changePassword(){var o=document.getElementById("oldPassword").value,n=document.getElementById("newPassword").value,c=document.getElementById("confirmPassword").value,e=document.getElementById("passwordError");if(!o||!n){e.textContent="请填写完整";e.style.display="block";return;}if(n.length<4){e.textContent="新密码至少4位";e.style.display="block";return;}if(n!==c){e.textContent="两次密码不一致";e.style.display="block";return;}try{var r=await fetch("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({old_password:o,new_password:n})});var d=await r.json();if(d.success){closeModal("passwordModal");alert("密码修改成功");}else{e.textContent=d.message||"修改失败";e.style.display="block";}}catch(er){e.textContent="网络错误";e.style.display="block";}}</script>
+        function closePasswordModal(id){document.getElementById(id).style.display="none";}
+        async function changePassword(){var o=document.getElementById("oldPassword").value,n=document.getElementById("newPassword").value,c=document.getElementById("confirmPassword").value,e=document.getElementById("passwordError");if(!o||!n){e.textContent="请填写完整";e.style.display="block";return;}if(n.length<4){e.textContent="新密码至少4位";e.style.display="block";return;}if(n!==c){e.textContent="两次密码不一致";e.style.display="block";return;}try{var r=await fetch("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({old_password:o,new_password:n})});var d=await r.json();if(d.success){closePasswordModal("passwordModal");alert("密码修改成功");}else{e.textContent=d.message||"修改失败";e.style.display="block";}}catch(er){e.textContent="网络错误";e.style.display="block";}}</script>
 
 </body>
 </html>
