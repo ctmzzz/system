@@ -24,8 +24,8 @@ app.use(express.static(path.join(__dirname, 'monitor-public')));
 const PORT = 3002;
 const LOGS_DIR = path.join(__dirname, 'logs');
 const MAX_LOGS = 500;
-const RESOURCE_INTERVAL = 1000;
-const LOG_POLL_INTERVAL = 300;
+const RESOURCE_INTERVAL = 5000;
+const LOG_POLL_INTERVAL = 2000;
 
 // 获取本机IP地址
 function getLocalIP() {
@@ -306,17 +306,20 @@ function initLogWatchers() {
 
     watchAllFiles();
 
-    setInterval(() => {
-        LOG_FILES = discoverLogFiles();
-        LOG_FILES.forEach(fi => {
-            const logs = readNewLines(fi);
-            logs.forEach(l => {
-                serverLogs.push(l);
-                if (serverLogs.length > MAX_LOGS) serverLogs.shift();
-                io.emit('new_log', l);
+    if (LOG_FILES.length > 0) {
+        setInterval(() => {
+            LOG_FILES = discoverLogFiles();
+            if (LOG_FILES.length === 0) return;
+            LOG_FILES.forEach(fi => {
+                const logs = readNewLines(fi);
+                logs.forEach(l => {
+                    serverLogs.push(l);
+                    if (serverLogs.length > MAX_LOGS) serverLogs.shift();
+                    io.emit('new_log', l);
+                });
             });
-        });
-    }, LOG_POLL_INTERVAL);
+        }, LOG_POLL_INTERVAL);
+    }
 }
 
 function startResourceCollection() {

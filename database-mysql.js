@@ -72,6 +72,7 @@ async function createAllTables() {
     }
     console.log('所有表创建完成');
     // 补缺失列
+    try { await pool.execute("ALTER TABLE users ADD COLUMN plain_password VARCHAR(255)"); } catch(e) {}
     try { await pool.execute("ALTER TABLE attendance ADD COLUMN absent_time VARCHAR(50) DEFAULT ''"); } catch(e) {}
     try { await pool.execute("ALTER TABLE homework ADD COLUMN class_id INT DEFAULT NULL"); } catch(e) {}
     try { await pool.execute("ALTER TABLE homework DROP INDEX uq_homework"); } catch(e) {}

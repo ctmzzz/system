@@ -917,8 +917,14 @@ function validateAccountId(employee_id, role) {
 
 // 获取用户列表（包含密码）
 app.get('/api/users', requireAuth, async (req, res) => {
-    const users = await database.all('SELECT id, employee_id, name, plain_password, role FROM users');
-    res.json({ success: true, data: users });
+    try {
+        const users = await database.all('SELECT id, employee_id, name, plain_password, role FROM users');
+        console.log(`[API /api/users] 查询到 ${users.length} 个用户`);
+        res.json({ success: true, data: users });
+    } catch (err) {
+        console.error('[API /api/users] 错误:', err.message);
+        res.json({ success: true, data: [] });
+    }
 });
 
 // 添加用户
