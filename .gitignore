@@ -8,4 +8,8 @@ logs/*.log
 logs/preview-*.log
 *.xlsx
 *.xls
+*.zip
+system-*/
+.tmp_zip*/
+start-local-server.cmd
 ~$*

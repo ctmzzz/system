@@ -1078,7 +1078,7 @@
         window.addEventListener('resize', resizeStarCanvas);
 
         const stars = [];
-        const starCount = 180;
+        const starCount = 70;
 
         for (let i = 0; i < starCount; i++) {
             stars.push({
@@ -1093,7 +1093,14 @@
 
         let time = 0;
 
-        function renderStars() {
+        let lastStarFrame = 0;
+
+        function renderStars(frameTime = 0) {
+            if (frameTime - lastStarFrame < 33) {
+                requestAnimationFrame(renderStars);
+                return;
+            }
+            lastStarFrame = frameTime;
             starCtx.clearRect(0, 0, starCanvas.width, starCanvas.height);
 
             time += 0.016;
@@ -1154,7 +1161,14 @@
 
         let waveOffset = 0;
 
-        function drawWaveform() {
+        let lastWaveFrame = 0;
+
+        function drawWaveform(frameTime = 0) {
+            if (frameTime - lastWaveFrame < 33) {
+                requestAnimationFrame(drawWaveform);
+                return;
+            }
+            lastWaveFrame = frameTime;
             waveCtx.clearRect(0, 0, waveCanvas.width, waveCanvas.height);
 
             const waves = [
@@ -1195,7 +1209,7 @@
 
         drawWaveform();
 
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 12; i++) {
             const p = document.createElement('div');
             p.className = 'floating-particle';
             p.style.left = Math.random() * 100 + '%';
@@ -1564,7 +1578,14 @@
                 ctx.fill();
             }
             
-            function animate() {
+            let lastEarthFrame = 0;
+
+            function animate(frameTime = 0) {
+                if (frameTime - lastEarthFrame < 33) {
+                    requestAnimationFrame(animate);
+                    return;
+                }
+                lastEarthFrame = frameTime;
                 rotationY += rotationSpeed;
                 drawSphere();
                 requestAnimationFrame(animate);
