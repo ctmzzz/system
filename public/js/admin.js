@@ -10,7 +10,7 @@ async function checkAuth() {
         window.currentUser = data.user; // 暴露给 collab.js
         document.getElementById('userName').textContent = data.user.name;
         document.getElementById('userAvatar').textContent = data.user.name.charAt(0);
-        const roleMap = { admin: '系统管理员', teacher: '教师', student: '学生', class: '班级' };
+        const roleMap = { admin: '系统管理员', teacher: '教师', student: '学生', class: '班级', course: '课程管理员' };
         document.getElementById('userRoleText').textContent = roleMap[data.user.role] || '教师';
         return data.user;
     } catch (err) {
@@ -85,7 +85,7 @@ function closeModal(id) {
 }
 
 // ===== 角色映射 =====
-const ROLE_LABELS = { admin: '管理员', teacher: '教师', class: '班级', student: '学生' };
+const ROLE_LABELS = { admin: '管理员', teacher: '教师', class: '班级', student: '学生', course: '课程管理员' };
 
 // ===== 用户管理 =====
 let allUsers = [];
@@ -277,13 +277,14 @@ function handleUserFileSelect(event) {
                 }
 
                 // 角色名映射：中文→英文
-                const roleMap = { '教师': 'teacher', '管理员': 'admin', '学生': 'student', '班级': 'class', 'teacher': 'teacher', 'admin': 'admin', 'student': 'student', 'class': 'class' };
+                const roleMap = { '教师': 'teacher', '管理员': 'admin', '学生': 'student', '班级': 'class', '课程管理员': 'course', '课程': 'course', 'teacher': 'teacher', 'admin': 'admin', 'student': 'student', 'class': 'class', 'course': 'course' };
                 const userRole = roleMap[role] || 'teacher';
 
                 // 账号格式校验
-                const idPatterns = { teacher: /^\d{4}$/, student: /^\d{10}$/, class: /^\d{5}$/, admin: /^.{1,20}$/ };
+                const idPatterns = { teacher: /^\d{4}$/, student: /^\d{10}$/, class: /^\d{5}$/, admin: /^.{1,20}$/, course: /^.{1,20}$/ };
                 if (idPatterns[userRole] && !idPatterns[userRole].test(employee_id)) {
-                    previewRows.push(`<tr style="background:#fee2e2;"><td>❌ 第${i+1}行: ${ROLE_LABELS[userRole]}账号需${userRole==='student'?'10位':(userRole==='teacher'?'4位':'5位')}数字</td><td>${employee_id || '-'}</td><td>${name || '-'}</td><td>${password || '-'}</td><td>${ROLE_LABELS[userRole] || ''}</td></tr>`);
+                    const lengthText = userRole === 'student' ? '10位' : (userRole === 'teacher' ? '4位' : (userRole === 'class' ? '5位' : '1-20位'));
+                    previewRows.push(`<tr style="background:#fee2e2;"><td>❌ 第${i+1}行: ${ROLE_LABELS[userRole]}账号需${lengthText}${userRole === 'admin' || userRole === 'course' ? '字符' : '数字'}</td><td>${employee_id || '-'}</td><td>${name || '-'}</td><td>${password || '-'}</td><td>${ROLE_LABELS[userRole] || ''}</td></tr>`);
                     hasError = true;
                     continue;
                 }

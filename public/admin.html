@@ -203,6 +203,7 @@
                         <option value="teacher">教师</option>
                         <option value="class">班级</option>
                         <option value="student">学生</option>
+                        <option value="course">课程管理员</option>
                         <option value="admin">管理员</option>
                     </select>
                 </div>
@@ -229,7 +230,7 @@
                     <div class="file-upload-area" id="userFileUploadArea">
                         <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
                         <p>点击选择文件或将文件拖拽到此处</p>
-                        <small>支持 .xlsx, .xls 格式（列顺序：账号，姓名，密码，角色）</small>
+                        <small>支持 .xlsx, .xls 格式（列顺序：账号，姓名，密码，角色；角色可填教师、学生、班级、课程管理员、管理员）</small>
                         <input type="file" id="userExcelFileInput" accept=".xlsx,.xls" style="display:none;" onchange="handleUserFileSelect(event)">
                     </div>
                     <div id="userFileNameDisplay" style="margin-top:10px;color:var(--primary-color);font-weight:500;"></div>
@@ -434,7 +435,7 @@
                 tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-secondary);">暂无数据</td></tr>';
                 return;
             }
-            const ROLE_LABELS = { 'admin': '管理员', 'teacher': '教师', 'class': '班级', 'student': '学生' };
+            const ROLE_LABELS = { 'admin': '管理员', 'teacher': '教师', 'class': '班级', 'student': '学生', 'course': '课程管理员' };
             tbody.innerHTML = users.map(user => `
                 <tr>
                     <td>${user.employee_id}</td>
@@ -512,7 +513,8 @@
             teacher: { pattern: /^\d{4}$/, hint: '教师账号：4位数字，如 1001' },
             student: { pattern: /^\d{10}$/, hint: '学生学号：10位数字，如 2024001001' },
             class:    { pattern: /^\d{5}$/, hint: '班级账号：5位数字，如 25008' },
-            admin:     { pattern: /^.{1,20}$/,  hint: '管理员：任意字符' }
+            admin:     { pattern: /^.{1,20}$/,  hint: '管理员：任意字符' },
+            course:    { pattern: /^.{1,20}$/,  hint: '课程管理员：任意字符' }
         };
 
         function onUserRoleChange() {

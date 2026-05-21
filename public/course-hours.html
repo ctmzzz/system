@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>课时统计 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css?v=course-hours-20260521-1">
+</head>
+<body class="course-hours-page">
+    <div class="main-layout">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                <span>课程管理</span>
+            </div>
+            <nav class="nav-menu course-side-menu">
+                <button class="nav-item active" id="courseScheduleSideTab" onclick="switchCourseModule('schedule')">
+                    <span>课程表统计</span>
+                </button>
+                <button class="nav-item" id="clubSubstituteSideTab" onclick="switchCourseModule('club')">
+                    <span>社团代课总表</span>
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">课</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">课程管理员</div>
+                        <div class="user-role" id="userRoleText">课程管理员</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="page-header">
+                <div class="header-left">
+                    <h1 class="page-title" id="coursePageTitle">课程表统计</h1>
+                </div>
+                <div class="header-right">
+                    <button class="logout-btn" onclick="logout()">退出登录</button>
+                </div>
+            </header>
+
+            <div class="page-content">
+                <div class="course-module-tabs">
+                    <button class="course-module-tab active" id="courseScheduleTab" onclick="switchCourseModule('schedule')">课程表统计</button>
+                    <button class="course-module-tab" id="clubSubstituteTab" onclick="switchCourseModule('club')">社团代课总表</button>
+                </div>
+
+                <section class="course-module-view active" id="courseScheduleView">
+                    <div class="card-grid course-hour-summary">
+                        <div class="stat-card">
+                            <div class="stat-card-label">总课时</div>
+                            <div class="stat-card-value" id="courseTotalHours">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-label">授课教师</div>
+                            <div class="stat-card-value" id="courseTeacherCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-card-label">课程记录</div>
+                            <div class="stat-card-value" id="courseRecordCount">0</div>
+                        </div>
+                    </div>
+
+                    <div class="table-container course-hour-panel">
+                        <div class="table-header">
+                            <h3 class="table-title">教师课程表与课时统计</h3>
+                            <div class="table-actions">
+                                <button class="btn btn-secondary" onclick="openModal('courseImportModal')">导入课程表</button>
+                                <button class="btn btn-danger" onclick="clearCourseHours()">清空课时数据</button>
+                            </div>
+                        </div>
+                        <div class="course-hour-filters">
+                            <input type="date" id="courseStartDate">
+                            <input type="date" id="courseEndDate">
+                            <input type="text" id="courseTeacherFilter" placeholder="教师姓名/工号">
+                            <input type="text" id="courseSubjectFilter" placeholder="科目">
+                            <button class="btn btn-primary" onclick="loadCourseHourStats()">查询</button>
+                            <button class="btn btn-secondary" onclick="resetCourseHourFilters()">重置</button>
+                        </div>
+                        <div class="course-hour-grid">
+                            <div>
+                                <h4 class="course-hour-title">按教师汇总</h4>
+                                <table>
+                                    <thead>
+                                        <tr><th>教师</th><th>工号</th><th>课时</th><th>记录数</th></tr>
+                                    </thead>
+                                    <tbody id="courseTeacherStatsTable"></tbody>
+                                </table>
+                            </div>
+                            <div>
+                                <h4 class="course-hour-title">按科目汇总</h4>
+                                <table>
+                                    <thead>
+                                        <tr><th>科目</th><th>课时</th><th>记录数</th></tr>
+                                    </thead>
+                                    <tbody id="courseSubjectStatsTable"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <h4 class="course-hour-title">课程明细</h4>
+                        <div class="course-table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>日期</th>
+                                        <th>星期</th>
+                                        <th>节次</th>
+                                        <th>教师</th>
+                                        <th>科目</th>
+                                        <th>班级</th>
+                                        <th>课时</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="courseRecordsTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="course-module-view" id="clubSubstituteView">
+                    <div class="table-container course-hour-panel substitute-panel">
+                        <div class="table-header">
+                            <h3 class="table-title">社团代课总表</h3>
+                            <div class="table-actions">
+                                <button class="btn btn-secondary" onclick="openModal('substitutePoolModal')">导入社团代课名单</button>
+                                <button class="btn btn-secondary" onclick="exportSubstituteDashboard()">导出总表</button>
+                                <button class="btn btn-primary" onclick="openModal('substituteRequestModal')">登记代课</button>
+                            </div>
+                        </div>
+                        <div class="course-hour-filters">
+                            <input type="date" id="subStartDate">
+                            <input type="date" id="subEndDate">
+                            <input type="text" id="subTeacherFilter" placeholder="老师姓名">
+                            <input type="text" id="subCourseFilter" placeholder="社团/课程">
+                            <button class="btn btn-primary" onclick="loadSubstituteDashboard()">查询</button>
+                            <button class="btn btn-secondary" onclick="resetSubstituteFilters()">重置</button>
+                        </div>
+                        <div class="card-grid course-hour-summary substitute-summary">
+                            <div class="stat-card">
+                                <div class="stat-card-label">可代课老师</div>
+                                <div class="stat-card-value" id="availableSubTeacherCount">0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">已登记代课</div>
+                                <div class="stat-card-value" id="substituteRequestCount">0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">涉及社团/课程</div>
+                                <div class="stat-card-value" id="substituteCourseCount">0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">开展日期</div>
+                                <div class="stat-card-value" id="substituteDateCount">0</div>
+                            </div>
+                        </div>
+
+                        <h4 class="course-hour-title">社团代课完整总表</h4>
+                        <div class="course-table-scroll">
+                            <table class="substitute-master-table">
+                                <thead>
+                                    <tr>
+                                        <th>日期</th>
+                                        <th>类型</th>
+                                        <th>社团/课程</th>
+                                        <th>请假老师</th>
+                                        <th>代课老师</th>
+                                        <th>原因</th>
+                                        <th>备注</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="substituteRecordsTable"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="course-hour-grid substitute-insight-grid">
+                            <div>
+                                <h4 class="course-hour-title">按代课老师统计</h4>
+                                <table>
+                                    <thead>
+                                        <tr><th>代课老师</th><th>代课次数</th><th>代课明细</th></tr>
+                                    </thead>
+                                    <tbody id="substituteTeacherStatsTable"></tbody>
+                                </table>
+                            </div>
+                            <div>
+                                <h4 class="course-hour-title">按社团/课程开展统计</h4>
+                                <table>
+                                    <thead>
+                                        <tr><th>社团/课程</th><th>类型</th><th>开展次数</th><th>日期范围</th></tr>
+                                    </thead>
+                                    <tbody id="substituteCourseStatsTable"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <h4 class="course-hour-title">老师名单总表</h4>
+                        <div class="course-table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>老师</th>
+                                        <th>可代课</th>
+                                        <th>当前安排</th>
+                                        <th>代课次数</th>
+                                        <th>被代/请假次数</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="availableSubTeachersTable"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="courseImportModal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2 class="modal-title">导入教师课程表</h2>
+                <button class="modal-close" onclick="closeModal('courseImportModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <div class="modal-form">
+                <div class="form-group">
+                    <label>Excel 文件</label>
+                    <input type="file" id="courseExcelFile" accept=".xlsx">
+                    <small class="form-help">支持 .xlsx 文件。表头支持：教师账号、教师姓名、科目、班级、日期、星期、节次、课时。</small>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('courseImportModal')">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="importCourseHours()">导入</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="substitutePoolModal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2 class="modal-title">导入社团代课名单</h2>
+                <button class="modal-close" onclick="closeModal('substitutePoolModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <div class="modal-form">
+                <div class="form-group">
+                    <label>社团/第二课堂 Excel</label>
+                    <input type="file" id="substitutePoolFile" accept=".xlsx">
+                    <small class="form-help">系统读取姓名、社团、第二课堂和日期列。黄色底色的老师会标记为不可代课。</small>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('substitutePoolModal')">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="importSubstituteTeachers()">导入</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="substituteRequestModal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2 class="modal-title">登记代课</h2>
+                <button class="modal-close" onclick="closeModal('substituteRequestModal')">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+            <form class="modal-form" onsubmit="return saveSubstituteRequest(event)">
+                <div class="form-group">
+                    <label>日期</label>
+                    <input type="date" id="subCourseDate">
+                </div>
+                <div class="form-group">
+                    <label>类型</label>
+                    <select id="subActivityType">
+                        <option value="社团">社团</option>
+                        <option value="第二课堂">第二课堂</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>社团/课程名称</label>
+                    <input type="text" id="subCourseName" placeholder="如：AI社团、古风社">
+                </div>
+                <div class="form-group">
+                    <label>请假老师</label>
+                    <input type="text" id="subOriginalTeacher" placeholder="请输入请假老师姓名" required>
+                </div>
+                <div class="form-group">
+                    <label>代课老师</label>
+                    <select id="substituteTeacherSelect" required></select>
+                </div>
+                <div class="form-group">
+                    <label>请假原因</label>
+                    <input type="text" id="subReason" placeholder="如：事假、公假、病假">
+                </div>
+                <div class="form-group">
+                    <label>备注</label>
+                    <input type="text" id="subNotes" placeholder="可填写补充说明">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('substituteRequestModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <script src="/js/course-hours.js?v=course-hours-20260520-2"></script>
+</body>
+</html>

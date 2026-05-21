@@ -42,11 +42,11 @@ function getLocalIP() {
 const LOCAL_IP = getLocalIP();
 
 const DB_CONFIG = {
-    host: '192.168.3.6',
-    port: 3306,
-    user: 'root',
-    password: 'Saodiseng1',
-    database: 'score_analysis',
+    host: process.env.DB_HOST || '192.168.3.6',
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'score_analysis',
     waitForConnections: true,
     connectionLimit: 5,
     queueLimit: 0

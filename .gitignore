@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+.pm2/
+.pm2-home/
+.codex_spreadsheet_work/
+logs/*.log
+logs/preview-*.log
+*.xlsx
+*.xls
+~$*

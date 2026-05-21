@@ -2,11 +2,11 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 
 const DB_CONFIG = {
-    host: '192.168.3.6',
-    port: 3306,
-    user: 'root',
-    password: 'Saodiseng1',
-    database: 'score_analysis',
+    host: process.env.DB_HOST || '192.168.3.6',
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'score_analysis',
     waitForConnections: true,
     connectionLimit: 50,
     queueLimit: 100,
@@ -39,7 +39,7 @@ async function initDatabase() {
     await initConn.end();
 
     pool = mysql.createPool(DB_CONFIG);
-    console.log('MySQL 连接成功 (192.168.3.6)');
+    console.log(`MySQL connected (${DB_CONFIG.host})`);
 
     await createAllTables();
 
@@ -65,7 +65,11 @@ async function createAllTables() {
         `CREATE TABLE IF NOT EXISTS beauty_score_events (id INT AUTO_INCREMENT PRIMARY KEY, class_id INT NOT NULL, student_id VARCHAR(50) NOT NULL, row_index INT NOT NULL, month VARCHAR(20) NOT NULL, score DECIMAL(10,2) DEFAULT 0, event_name VARCHAR(200) DEFAULT '', entry_date VARCHAR(20) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
         `CREATE TABLE IF NOT EXISTS announcements (id INT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(200) NOT NULL, content TEXT NOT NULL, start_date VARCHAR(20) DEFAULT '', end_date VARCHAR(20) DEFAULT '', is_active TINYINT(1) DEFAULT 1, created_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
         `CREATE TABLE IF NOT EXISTS homework (id INT AUTO_INCREMENT PRIMARY KEY, semester VARCHAR(50) NOT NULL, subject VARCHAR(100) NOT NULL, content TEXT, class_id INT DEFAULT NULL, created_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_homework (semester, subject, class_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-        `CREATE TABLE IF NOT EXISTS homework_data (id INT AUTO_INCREMENT PRIMARY KEY, semester VARCHAR(50) NOT NULL, class_id INT NOT NULL, subject VARCHAR(100) NOT NULL, date VARCHAR(20) NOT NULL, student_id INT NOT NULL, submitted TINYINT(1) DEFAULT 0, late TINYINT(1) DEFAULT 0, created_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_homework_data (semester, class_id, subject, date, student_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+        `CREATE TABLE IF NOT EXISTS homework_data (id INT AUTO_INCREMENT PRIMARY KEY, semester VARCHAR(50) NOT NULL, class_id INT NOT NULL, subject VARCHAR(100) NOT NULL, date VARCHAR(20) NOT NULL, student_id INT NOT NULL, submitted TINYINT(1) DEFAULT 0, late TINYINT(1) DEFAULT 0, created_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_homework_data (semester, class_id, subject, date, student_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS teacher_course_hours (id INT AUTO_INCREMENT PRIMARY KEY, teacher_employee_id VARCHAR(50) DEFAULT '', teacher_name VARCHAR(100) NOT NULL, subject VARCHAR(100) DEFAULT '', class_name VARCHAR(100) DEFAULT '', course_date VARCHAR(20) DEFAULT '', weekday VARCHAR(20) DEFAULT '', period_no VARCHAR(50) DEFAULT '', hours DECIMAL(10,2) DEFAULT 1, source_file VARCHAR(255) DEFAULT '', imported_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX idx_tch_teacher (teacher_employee_id, teacher_name), INDEX idx_tch_date (course_date), INDEX idx_tch_subject (subject)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS substitute_teachers (id INT AUTO_INCREMENT PRIMARY KEY, teacher_name VARCHAR(100) NOT NULL UNIQUE, can_substitute TINYINT(1) DEFAULT 1, current_assignments TEXT, source_file VARCHAR(255) DEFAULT '', updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS substitute_requests (id INT AUTO_INCREMENT PRIMARY KEY, activity_type VARCHAR(50) DEFAULT '社团', course_name VARCHAR(200) DEFAULT '', course_date VARCHAR(20) DEFAULT '', original_teacher VARCHAR(100) NOT NULL, substitute_teacher VARCHAR(100) NOT NULL, reason VARCHAR(255) DEFAULT '', notes TEXT, requested_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX idx_sub_date (course_date), INDEX idx_sub_teacher (substitute_teacher), INDEX idx_sub_original (original_teacher)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS club_activity_sessions (id INT AUTO_INCREMENT PRIMARY KEY, activity_type VARCHAR(50) DEFAULT '社团', course_name VARCHAR(200) DEFAULT '', course_date VARCHAR(20) DEFAULT '', scheduled_teacher VARCHAR(100) DEFAULT '', substitute_teacher VARCHAR(100) DEFAULT '', source_file VARCHAR(255) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_club_session (course_date, course_name, scheduled_teacher), INDEX idx_club_date (course_date), INDEX idx_club_course (course_name), INDEX idx_club_teacher (scheduled_teacher)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     ];
     for (const sql of tables) {
         await pool.execute(normalizeSQL(sql));
@@ -78,6 +82,12 @@ async function createAllTables() {
     try { await pool.execute("ALTER TABLE homework DROP INDEX uq_homework"); } catch(e) {}
     try { await pool.execute("ALTER TABLE homework ADD UNIQUE KEY uq_homework (semester, subject, class_id)"); } catch(e) {}
     try { await pool.execute("ALTER TABLE homework_data ADD COLUMN late TINYINT(1) DEFAULT 0"); } catch(e) {}
+    try { await pool.execute("ALTER TABLE teacher_course_hours ADD COLUMN source_file VARCHAR(255) DEFAULT ''"); } catch(e) {}
+    try { await pool.execute("ALTER TABLE teacher_course_hours ADD COLUMN imported_by VARCHAR(100) DEFAULT ''"); } catch(e) {}
+    try { await pool.execute("ALTER TABLE substitute_teachers ADD COLUMN current_assignments TEXT"); } catch(e) {}
+    try { await pool.execute("ALTER TABLE substitute_requests ADD COLUMN notes TEXT"); } catch(e) {}
+    try { await pool.execute("ALTER TABLE club_activity_sessions ADD COLUMN substitute_teacher VARCHAR(100) DEFAULT ''"); } catch(e) {}
+    try { await pool.execute("ALTER TABLE club_activity_sessions ADD COLUMN source_file VARCHAR(255) DEFAULT ''"); } catch(e) {}
 }
 
 // 异步数据库操作
