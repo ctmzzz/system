@@ -2395,6 +2395,32 @@ app.get('/api/analysis/trend', requireAuth, async (req, res) => {
     }
 });
 
+// 获取当前学生最新有成绩的考试ID（用于默认选中）
+app.get('/api/student/latest-exam-with-data', requireAuth, async (req, res) => {
+    const employee_id = req.session.user.employee_id;
+    try {
+        const student = await database.get('SELECT * FROM students WHERE student_id = ?', [employee_id]);
+        if (!student) return res.json({ success: false, message: '学生信息不存在' });
+
+        const exam = await database.get(`
+            SELECT e.id, e.name FROM exams e
+            WHERE EXISTS (
+                SELECT 1 FROM scores sc
+                WHERE sc.exam_id = e.id AND sc.student_id = ?
+                  AND sc.total_score NOT IN ('缺考', '免修')
+                  AND CAST(sc.total_score AS REAL) >= 0
+            )
+            ORDER BY e.date DESC
+            LIMIT 1
+        `, [student.id]);
+
+        res.json({ success: true, data: exam || null });
+    } catch (err) {
+        console.error('查询最新有成绩考试错误:', err.message);
+        res.json({ success: false, message: err.message });
+    }
+});
+
 // 学生个人仪表盘 API（当前考试的分数、排名、各科雷达图数据）
 app.get('/api/analysis/student-dashboard', requireAuth, async (req, res) => {
     const employee_id = req.session.user.employee_id;

@@ -449,42 +449,30 @@ function setupStudentView() {
 
 async function loadStudentExams() {
     try {
-        const res = await fetch('/api/exams');
-        const data = await res.json();
+        const [examsRes, latestRes] = await Promise.all([
+            fetch('/api/exams'),
+            fetch('/api/student/latest-exam-with-data')
+        ]);
+        const examsData = await examsRes.json();
+        const latestData = await latestRes.json();
+
         const select = document.getElementById('examSelect');
-        if (data.data.length === 0) {
+        if (examsData.data.length === 0) {
             select.innerHTML = '<option value="">暂无考试数据</option>';
             return;
         }
-        // 按日期降序排序（最新的在前）
-        data.data.sort((a, b) => new Date(b.date) - new Date(a.date));
-        select.innerHTML = data.data.map(exam => `<option value="${exam.id}">${exam.name}</option>`).join('');
-        // 从第一个（最新的）开始查找有成绩数据的考试
-        await tryFindLatestExamWithData(0);
+        examsData.data.sort((a, b) => new Date(b.date) - new Date(a.date));
+        select.innerHTML = examsData.data.map(exam => `<option value="${exam.id}">${exam.name}</option>`).join('');
+
+        if (latestData.success && latestData.data) {
+            select.value = latestData.data.id;
+        } else {
+            select.value = examsData.data[0].id;
+        }
+        await loadStudentDashboardData();
     } catch (err) {
         console.error('加载考试列表失败', err);
     }
-}
-
-async function tryFindLatestExamWithData(startIndex) {
-    const select = document.getElementById('examSelect');
-    const options = select.options;
-    // 从 startIndex 开始往后找
-    for (let i = startIndex; i < options.length; i++) {
-        const examId = options[i].value;
-        try {
-            const res = await fetch(`/api/analysis/student-dashboard?exam_id=${examId}`);
-            const result = await res.json();
-            if (result.success && result.data && result.data.total_score !== null) {
-                select.value = examId;
-                await loadStudentDashboardData();
-                return;
-            }
-        } catch (err) {}
-    }
-    // 如果都没有数据，默认选第一个
-    select.value = options[0].value;
-    await loadStudentDashboardData();
 }
 
 async function loadStudentDashboardData() {
