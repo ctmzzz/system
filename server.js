@@ -919,7 +919,7 @@ function validateAccountId(employee_id, role) {
 app.get('/api/users', requireAuth, async (req, res) => {
     try {
         const users = await database.all('SELECT id, employee_id, name, plain_password, role FROM users');
-        console.log(`[API /api/users] 查询到 ${users.length} 个用户`);
+        logEvent('查询用户列表', req, `共${users.length}个用户`);
         res.json({ success: true, data: users });
     } catch (err) {
         console.error('[API /api/users] 错误:', err.message);
@@ -953,6 +953,7 @@ app.post('/api/users', requireAuth, async (req, res) => {
     const hashedPassword = bcrypt.hashSync(password, 10);
     
     const result = await database.run('INSERT INTO users (employee_id, password, plain_password, name, role) VALUES (?, ?, ?, ?, ?)', [employee_id, hashedPassword, password, name, userRole]);
+    logEvent('添加用户', req, `账号=${employee_id}, 姓名=${name}, 角色=${userRole}`);
     
     res.json({ success: true, message: '添加成功', id: result.lastInsertRowid });
 });
@@ -996,6 +997,7 @@ app.post('/api/users/batch', requireAuth, async (req, res) => {
         }
     });
 
+    logEvent('批量导入用户', req, `成功${success}条，失败${failed}条`);
     res.json({ success: true, message: `导入完成：成功${success}条，失败${failed}条` });
 });
 
@@ -1008,6 +1010,8 @@ app.delete('/api/users/:id', requireAuth, async (req, res) => {
     }
 
     try {
+        // 先获取用户信息
+        const user = await database.get('SELECT * FROM users WHERE id = ?', [id]);
         // 只删除该用户创建的数据
         // 1. 删除该用户创建的成绩
         await database.run('DELETE FROM scores WHERE user_id = ?', [id]);
@@ -1024,6 +1028,7 @@ app.delete('/api/users/:id', requireAuth, async (req, res) => {
         // 5. 删除用户
         await database.run('DELETE FROM users WHERE id = ?', [id]);
 
+        logEvent('删除用户', req, user ? `账号=${user.employee_id}, 姓名=${user.name}` : `id=${id}`);
         res.json({ success: true, message: '删除成功，该用户的所有关联数据已清除' });
     } catch (err) {
         console.error('删除用户失败:', err);
@@ -1047,6 +1052,7 @@ app.get('/api/classes', requireAuth, async (req, res) => {
     
     sql += ' ORDER BY grade, name';
     const classes = await database.all(sql, params);
+    logEvent('查询班级列表', req, `共${classes.length}个班级`);
     res.json({ success: true, data: classes });
 });
 
@@ -1941,6 +1947,11 @@ app.get('/api/student/latest-exam-with-data', requireAuth, async (req, res) => {
         console.error('查询最新有成绩考试错误:', err.message);
         res.json({ success: false, message: err.message });
     }
+});
+
+// ===== 监控用：获取在线用户数 =====
+app.get('/api/monitor/online-count', (req, res) => {
+    res.json({ count: userSessions.size });
 });
 
 // 学生个人仪表盘 API（当前考试的分数、排名、各科雷达图数据）

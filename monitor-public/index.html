@@ -162,7 +162,26 @@
                     <div class="card-value db-value" id="dbStatus">
                         <span class="status-dot offline"></span> 数据库: 检测中
                     </div>
-                    <div class="card-detail">MySQL 192.168.3.6</div>
+                    <div class="card-detail" id="dbHost">MySQL localhost:3306</div>
+                </div>
+
+                <div class="card server-card">
+                    <div class="card-header">
+                        <div class="card-icon server-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                                <line x1="8" y1="21" x2="16" y2="21"/>
+                                <line x1="12" y1="17" x2="12" y2="21"/>
+                            </svg>
+                        </div>
+                        <span>主服务器</span>
+                    </div>
+                    <div class="card-value server-value" id="serverStatus">
+                        <span class="status-dot offline"></span> 状态: 检测中
+                    </div>
+                    <div class="card-detail">
+                        <button id="serverToggleBtn" class="server-toggle-btn">启动</button>
+                    </div>
                 </div>
 
                 <div class="card alert-card" id="alertCard">

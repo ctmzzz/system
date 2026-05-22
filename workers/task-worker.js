@@ -612,38 +612,53 @@ async function analyzeStudentDashboard({ studentId, examId }) {
     };
 }
 
+const { parentPort } = require('worker_threads');
+
 // ============ 主入口：任务分发 ============
-module.exports = async (task) => {
+async function processTask(task) {
     const { type, data } = task;
     try {
+        let result;
         switch (type) {
             case 'analyze_percentile':
-                return { success: true, data: await analyzePercentile(data) };
+                result = { success: true, data: await analyzePercentile(data) };
+                break;
 
             case 'analyze_trend':
-                return { success: true, data: await analyzeTrend(data) };
+                result = { success: true, data: await analyzeTrend(data) };
+                break;
 
             case 'analyze_student_detail':
-                return { success: true, data: await analyzeStudentDetail(data) };
+                result = { success: true, data: await analyzeStudentDetail(data) };
+                break;
 
             case 'analyze_student_dashboard':
-                return { success: true, data: await analyzeStudentDashboard(data) };
+                result = { success: true, data: await analyzeStudentDashboard(data) };
+                break;
 
             case 'export_beauty_scores': {
                 const buf = await exportBeautyScores(data);
-                // 返回 ArrayBuffer 的 transfer list 形式
-                return { success: true, buffer: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
+                result = { success: true, buffer: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
+                break;
             }
 
             case 'export_attendance': {
                 const buf = await exportAttendance(data);
-                return { success: true, buffer: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
+                result = { success: true, buffer: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
+                break;
             }
 
             default:
-                return { success: false, message: '未知任务类型: ' + type };
+                result = { success: false, message: '未知任务类型: ' + type };
         }
+        return result;
     } catch (err) {
         return { success: false, message: err.message };
     }
-};
+}
+
+// 监听消息
+parentPort.on('message', async (task) => {
+    const result = await processTask(task);
+    parentPort.postMessage(result);
+});

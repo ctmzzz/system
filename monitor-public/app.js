@@ -107,6 +107,7 @@ function showMonitor() {
     initLogWorker();
     initSocket();
     initChart();
+    initServerControl();
 }
 
 function initLogoutBtn() {
@@ -197,6 +198,10 @@ function updateSystemInfo(data) {
     const dbDot = dbStatus.querySelector('.status-dot');
     dbDot.className = 'status-dot ' + (data.dbConnected ? 'online' : 'offline');
     dbStatus.lastChild.textContent = ' 数据库: ' + (data.dbConnected ? '已连接' : '未连接');
+
+    if (data.dbHost) {
+        document.getElementById('dbHost').textContent = 'MySQL ' + data.dbHost + ':' + (data.dbPort || 3306);
+    }
 
     const onlineStatus = document.getElementById('onlineStatus');
     const onlineDot = onlineStatus.querySelector('.status-dot');
@@ -334,6 +339,62 @@ function initFilterButtons() {
             currentFilter = btn.dataset.filter;
             renderAllLogs();
         });
+    });
+}
+
+function initServerControl() {
+    const statusEl = document.getElementById('serverStatus');
+    const toggleBtn = document.getElementById('serverToggleBtn');
+    const dbStatusEl = document.getElementById('dbStatus');
+    const dbHostEl = document.getElementById('dbHost');
+    
+    async function updateServerStatus() {
+        try {
+            const res = await fetch('/api/server-status');
+            const data = await res.json();
+            
+            // 更新主服务器状态
+            if (data.running) {
+                statusEl.innerHTML = '<span class="status-dot online"></span> 状态: 运行中';
+                toggleBtn.textContent = '停止';
+                toggleBtn.classList.add('stop');
+            } else {
+                statusEl.innerHTML = '<span class="status-dot offline"></span> 状态: 已停止';
+                toggleBtn.textContent = '启动';
+                toggleBtn.classList.remove('stop');
+            }
+            
+            // 更新数据库状态（主服务器的）
+            if (data.running && data.dbConnected) {
+                dbStatusEl.innerHTML = '<span class="status-dot online"></span> 数据库: 已连接';
+                dbHostEl.textContent = 'MySQL 192.168.3.6:3306';
+            } else if (data.running) {
+                dbStatusEl.innerHTML = '<span class="status-dot offline"></span> 数据库: 连接中';
+            } else {
+                dbStatusEl.innerHTML = '<span class="status-dot offline"></span> 数据库: 未连接';
+            }
+        } catch (e) {
+            statusEl.innerHTML = '<span class="status-dot offline"></span> 状态: 检测失败';
+            dbStatusEl.innerHTML = '<span class="status-dot offline"></span> 数据库: 检测失败';
+        }
+    }
+
+    updateServerStatus();
+    setInterval(updateServerStatus, 3000);
+
+    toggleBtn.addEventListener('click', async () => {
+        try {
+            const statusRes = await fetch('/api/server-status');
+            const statusData = await statusRes.json();
+            
+            if (statusData.running) {
+                await fetch('/api/server-stop', { method: 'POST' });
+            } else {
+                await fetch('/api/server-start', { method: 'POST' });
+            }
+            
+            setTimeout(updateServerStatus, 500);
+        } catch (e) {}
     });
 }
 

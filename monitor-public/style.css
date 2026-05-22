@@ -431,3 +431,24 @@ body {
     .top-bar { padding: 0 12px; }
     .perf-stats { display: none; }
 }
+
+.server-toggle-btn {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--success);
+    color: white;
+    transition: all 0.2s;
+}
+
+.server-toggle-btn:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+.server-toggle-btn.stop {
+    background: var(--error);
+}
