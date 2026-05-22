@@ -2303,13 +2303,43 @@ app.get('/api/beauty-scores/calendar-events', requireAuth, async (req, res) => {
             
             if (!grouped[date]) grouped[date] = [];
             
+            // 辅助函数：把时间字符串转换为相对于7:50的分钟数
+            const timeToMinutes = (timeStr) => {
+                if (!timeStr) return null;
+                const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+                if (!match) return null;
+                const h = parseInt(match[1]);
+                const m = parseInt(match[2]);
+                const totalMinutes = h * 60 + m;
+                const base = 7 * 60 + 50;
+                return totalMinutes - base;
+            };
+            
             let eventLabel = '';
             if (r.status === 'late') {
-                eventLabel = r.late_time ? `迟到 (${r.late_time})` : '迟到';
+                if (r.late_time) {
+                    const minutes = timeToMinutes(r.late_time);
+                    if (minutes !== null) {
+                        eventLabel = `迟到 (${minutes}分钟)`;
+                    } else {
+                        eventLabel = `迟到 (${r.late_time})`;
+                    }
+                } else {
+                    eventLabel = '迟到';
+                }
             } else if (r.status === 'leave') {
                 eventLabel = r.leave_type ? `请假 (${r.leave_type})` : '请假';
             } else if (r.status === 'absent') {
-                eventLabel = r.absent_time ? `旷课 (${r.absent_time})` : '旷课';
+                if (r.absent_time) {
+                    const minutes = timeToMinutes(r.absent_time);
+                    if (minutes !== null) {
+                        eventLabel = `旷课 (${minutes}分钟)`;
+                    } else {
+                        eventLabel = `旷课 (${r.absent_time})`;
+                    }
+                } else {
+                    eventLabel = '旷课';
+                }
             }
             
             grouped[date].push({

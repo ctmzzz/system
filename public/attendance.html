@@ -1086,12 +1086,15 @@
                 expClassSel.value = document.getElementById('classSelect').value;
             }
             onExportClassChange();
-            // 设置默认日期范围（当天 ~ 月末）
+            // 设置默认日期范围（当天 ~ 月末，但不超过今天）
             const now = new Date();
             const today = now.toISOString().slice(0, 10);
             const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+            // 设置结束日期最大值为今天
+            document.getElementById('exportStartDate').setAttribute('max', today);
+            document.getElementById('exportEndDate').setAttribute('max', today);
             document.getElementById('exportStartDate').value = today;
-            document.getElementById('exportEndDate').value = lastDay;
+            document.getElementById('exportEndDate').value = today; // 默认结束日期也为今天
             document.getElementById('exportModal').classList.add('show');
         }
 
@@ -1129,6 +1132,7 @@
             const classId = document.getElementById('exportClassSelect').value;
             const startDate = document.getElementById('exportStartDate').value;
             const endDate = document.getElementById('exportEndDate').value;
+            const today = new Date().toISOString().slice(0, 10);
 
             let hasErr = false;
             if (!classId) { document.getElementById('exportErrClass').classList.add('show'); hasErr = true; }
@@ -1138,6 +1142,20 @@
 
             if (new Date(startDate) > new Date(endDate)) {
                 document.getElementById('exportErrEndRange').classList.add('show');
+                return;
+            }
+            
+            // 验证日期不超过今天
+            if (new Date(endDate) > new Date(today)) {
+                const errEl = document.getElementById('exportErrEnd');
+                errEl.textContent = '结束日期不能超过今天';
+                errEl.classList.add('show');
+                return;
+            }
+            if (new Date(startDate) > new Date(today)) {
+                const errEl = document.getElementById('exportErrStart');
+                errEl.textContent = '开始日期不能超过今天';
+                errEl.classList.add('show');
                 return;
             }
             

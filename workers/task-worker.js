@@ -245,123 +245,226 @@ async function exportBeautyScores({ classId, startMonth, endMonth, studentIds, i
     const tree = indicatorTree || [];
     const thinBorder = { style: 'thin', color: { argb: 'FF000000' } };
     const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
+    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2F3' } };
+    const totalFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    const totalBorder = { top: { style: 'medium', color: { argb: 'FF93C5FD' } }, left: thinBorder, bottom: thinBorder, right: thinBorder };
 
     const wb = new ExcelJS.Workbook();
 
-    function calcRowspan(arr, key) {
-        const map = {};
-        let last = null, cnt = 0;
-        for (let i = 0; i <= arr.length; i++) {
-            const cur = i < arr.length ? arr[i][key] : null;
-            if (cur === last) { cnt++; }
-            else {
-                if (last !== null) map[last] = cnt;
-                last = cur;
-                cnt = 1;
-            }
-        }
-        return map;
-    }
-
     for (const month of months) {
         const ws = wb.addWorksheet(month);
-        const positions = ['', 'Lv1', 'Lv2', 'Lv3', '指标点描述', '分值'];
-        students.forEach((s, si) => { positions.push(s.name + (si + 1)); });
 
-        const l0Span = calcRowspan(tree, 'l0');
-        const l1Span = calcRowspan(tree, 'l1');
-        const l2Span = calcRowspan(tree, 'l2');
+        // 固定 5 列 + 学生列
+        const FIXED_COLS = 5;
 
         let rowNum = 1;
 
-        // 标题行
-        const titleRow = ws.getRow(rowNum);
-        titleRow.getCell(1).value = month + ' 美丽学分评价表';
-        ws.mergeCells(rowNum, 1, rowNum, positions.length);
-        titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-        titleRow.getCell(1).font = { bold: true, size: 14 };
-        titleRow.height = 30;
-        rowNum++;
-
-        // 表头
+        // ===== 表头行 =====
         const headerRow = ws.getRow(rowNum);
-        positions.forEach((p, i) => {
+        const headers = ['行规目标', '一级指标', '二级指标', '观察点', '评分标准'];
+        headers.forEach((h, i) => {
             const cell = headerRow.getCell(i + 1);
-            cell.value = p;
+            cell.value = h;
             cell.font = { bold: true, size: 10 };
             cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
             cell.border = allBorders;
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2F3' } };
+            cell.fill = headerFill;
         });
-        headerRow.height = 25;
+        students.forEach((s, si) => {
+            const cell = headerRow.getCell(FIXED_COLS + 1 + si);
+            const shortId = String(s.student_id).slice(-2);
+            cell.value = shortId + '\n' + s.name;
+            cell.font = { bold: true, size: 9 };
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+            cell.border = allBorders;
+            cell.fill = headerFill;
+        });
+        headerRow.height = 32;
         rowNum++;
 
-        // 指标行
-        let l0Start = {};
-        let l1Start = {};
-        let l2Start = {};
+        // ===== 先统计连续分组的 span =====
+        const l0Spans = [];
+        const l1Spans = [];
+        const l2Spans = [];
 
+        let lastL0 = null, lastL1 = null, lastL2 = null;
+        let start0 = 0, start1 = 0, start2 = 0;
+        for (let i = 0; i <= tree.length; i++) {
+            const cur = i < tree.length ? tree[i] : null;
+
+            // l0
+            if (!cur || cur.l0 !== lastL0) {
+                if (lastL0 !== null) {
+                    for (let j = start0; j < i; j++) l0Spans[j] = i - start0;
+                }
+                if (cur) { lastL0 = cur.l0; start0 = i; }
+            }
+
+            // l1（需要同时检查 l0 也一致）
+            if (!cur || cur.l1 !== lastL1 || cur.l0 !== tree[start1].l0) {
+                if (lastL1 !== null) {
+                    for (let j = start1; j < i; j++) l1Spans[j] = i - start1;
+                }
+                if (cur) { lastL1 = cur.l1; start1 = i; }
+            }
+
+            // l2（需要同时检查 l1 和 l0 都一致）
+            if (!cur || cur.l2 !== lastL2 || cur.l1 !== tree[start2].l1 || cur.l0 !== tree[start2].l0) {
+                if (lastL2 !== null) {
+                    for (let j = start2; j < i; j++) l2Spans[j] = i - start2;
+                }
+                if (cur) { lastL2 = cur.l2; start2 = i; }
+            }
+        }
+
+        // ===== 填充所有数据行 =====
+        const dataStartRow = rowNum;
+        let prevL0 = '', prevL1 = '', prevL2 = '';
         for (let i = 0; i < tree.length; i++) {
             const item = tree[i];
             const r = ws.getRow(rowNum);
 
-            if (i === 0 || tree[i - 1].l0 !== item.l0) l0Start[item.l0] = rowNum;
-            if (i === 0 || tree[i - 1].l1 !== item.l1 || tree[i - 1].l0 !== item.l0) l1Start[item.l1] = rowNum;
-            if (i === 0 || tree[i - 1].l2 !== item.l2 || tree[i - 1].l1 !== item.l1 || tree[i - 1].l0 !== item.l0) l2Start[item.l2] = rowNum;
-
+            // 左侧 5 列
             r.getCell(1).value = item.l0;
             r.getCell(2).value = item.l1;
             r.getCell(3).value = item.l2;
             r.getCell(4).value = item.point;
             r.getCell(5).value = item.score;
 
+            for (let ci = 1; ci <= FIXED_COLS; ci++) {
+                const cell = r.getCell(ci);
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                cell.font = { size: 9 };
+                cell.border = allBorders;
+            }
+
+            // 评分标准列着色
+            const scoreCell = r.getCell(5);
+            const scoreStr = String(item.score || '');
+            if (scoreStr.startsWith('+')) {
+                scoreCell.font = { size: 9, color: { argb: 'FF166534' }, bold: true };
+            } else if (scoreStr.startsWith('-')) {
+                scoreCell.font = { size: 9, color: { argb: 'FF991B1B' }, bold: true };
+            } else {
+                scoreCell.font = { size: 9, bold: true };
+            }
+
+            // 学生列
             students.forEach((s, si) => {
                 const key = s.student_id + '_' + (i + 1);
                 const data = allData[month][key];
-                const cell = r.getCell(6 + si);
-                cell.value = data ? (parseFloat(data.score) || 0) : 0;
+                const val = data ? (parseFloat(data.score) || 0) : 0;
+                const cell = r.getCell(FIXED_COLS + 1 + si);
+                cell.value = val;
                 cell.alignment = { horizontal: 'center', vertical: 'middle' };
                 cell.border = allBorders;
+                cell.font = { size: 9 };
+                if (val > 0) {
+                    cell.font = { size: 9, color: { argb: 'FF166534' } };
+                } else if (val < 0) {
+                    cell.font = { size: 9, color: { argb: 'FF991B1B' } };
+                }
             });
 
-            for (let ci = 1; ci <= 5; ci++) {
-                r.getCell(ci).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-                r.getCell(ci).font = { size: 9 };
-                r.getCell(ci).border = allBorders;
-            }
             r.height = 22;
             rowNum++;
+            prevL0 = item.l0;
+            prevL1 = item.l1;
+            prevL2 = item.l2;
         }
 
-        // 合并 L0
-        for (const [name, span] of Object.entries(l0Span)) {
-            const start = l0Start[name];
-            if (start && span > 1) ws.mergeCells(start, 1, start + span - 1, 1);
-        }
-        // 合并 L1
-        for (const [name, span] of Object.entries(l1Span)) {
-            const start = l1Start[name];
-            if (start && span > 1) ws.mergeCells(start, 2, start + span - 1, 2);
-        }
-        // 合并 L2
-        for (const [name, span] of Object.entries(l2Span)) {
-            const start = l2Start[name];
-            if (start && span > 1) ws.mergeCells(start, 3, start + span - 1, 3);
+        // ===== 执行合并 =====
+        prevL0 = ''; prevL1 = ''; prevL2 = '';
+        for (let i = 0; i < tree.length; i++) {
+            const item = tree[i];
+            const isNewL0 = item.l0 !== prevL0;
+            const isNewL1 = isNewL0 || item.l1 !== prevL1;
+            const isNewL2 = isNewL1 || item.l2 !== prevL2;
+
+            const excelRow = dataStartRow + i;
+
+            if (isNewL0 && l0Spans[i] > 1) {
+                ws.mergeCells(excelRow, 1, excelRow + l0Spans[i] - 1, 1);
+            }
+            if (isNewL1 && l1Spans[i] > 1) {
+                ws.mergeCells(excelRow, 2, excelRow + l1Spans[i] - 1, 2);
+            }
+            if (isNewL2 && l2Spans[i] > 1) {
+                ws.mergeCells(excelRow, 3, excelRow + l2Spans[i] - 1, 3);
+            }
+
+            prevL0 = item.l0;
+            prevL1 = item.l1;
+            prevL2 = item.l2;
         }
 
-        // 列宽
+        // ===== 总分行 =====
+        const totalRow = ws.getRow(rowNum);
+        const totalLabelCell = totalRow.getCell(1);
+        totalLabelCell.value = '总分';
+        totalLabelCell.font = { bold: true, size: 10 };
+        totalLabelCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        totalLabelCell.fill = totalFill;
+        totalLabelCell.border = totalBorder;
+        ws.mergeCells(rowNum, 1, rowNum, FIXED_COLS);
+
+        for (let ci = 2; ci <= FIXED_COLS; ci++) {
+            const cell = totalRow.getCell(ci);
+            cell.border = totalBorder;
+            cell.fill = totalFill;
+        }
+
+        students.forEach((s, si) => {
+            let total = 0;
+            for (let i = 0; i < tree.length; i++) {
+                const key = s.student_id + '_' + (i + 1);
+                const data = allData[month][key];
+                if (data) total += parseFloat(data.score) || 0;
+            }
+            const cell = totalRow.getCell(FIXED_COLS + 1 + si);
+            cell.value = total;
+            cell.font = { bold: true, size: 9 };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.border = totalBorder;
+            cell.fill = totalFill;
+            if (total > 0) {
+                cell.font = { bold: true, size: 9, color: { argb: 'FF166534' } };
+            } else if (total < 0) {
+                cell.font = { bold: true, size: 9, color: { argb: 'FF991B1B' } };
+            }
+        });
+        totalRow.height = 26;
+
+        // ===== 列宽 =====
         ws.getColumn(1).width = 12;
-        ws.getColumn(2).width = 10;
+        ws.getColumn(2).width = 12;
         ws.getColumn(3).width = 12;
         ws.getColumn(4).width = 28;
-        ws.getColumn(5).width = 8;
+        ws.getColumn(5).width = 10;
         for (let si = 0; si < students.length; si++) {
-            ws.getColumn(6 + si).width = 8;
+            ws.getColumn(FIXED_COLS + 1 + si).width = 8;
         }
+
+        // 冻结表头
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
     }
 
     const buf = await wb.xlsx.writeBuffer();
     return buf;
+}
+
+// 辅助函数：把时间字符串转换为相对于7:50的分钟数
+function timeToMinutes(timeStr) {
+    if (!timeStr) return null;
+    // 解析 HH:MM 格式
+    const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    const h = parseInt(match[1]);
+    const m = parseInt(match[2]);
+    const totalMinutes = h * 60 + m;
+    // 7:50是 7*60+50 = 470 分钟
+    const base = 7 * 60 + 50;
+    return totalMinutes - base;
 }
 
 // ============ 考勤导出 ============
@@ -375,13 +478,41 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
         throw new Error('该班级没有学生');
     }
 
+    // 1. 先整理日期数据，按月份分组
     const dates = [];
     const sd = new Date(startDate);
     const ed = new Date(endDate);
+    // 获取今天的日期（只取日期部分，不考虑时间）
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     for (let d = new Date(sd); d <= ed; d.setDate(d.getDate() + 1)) {
-        dates.push(d.toISOString().slice(0, 10));
+        const dateOnly = new Date(d);
+        dateOnly.setHours(0, 0, 0, 0);
+        if (dateOnly <= today) { // 只添加不超过今天的日期
+            dates.push(new Date(d));
+        }
     }
 
+    // 按月份分组
+    const months = [];
+    let currentMonth = null;
+    dates.forEach((d) => {
+        const yearMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        const monthName = (d.getMonth() + 1) + '月';
+        if (!currentMonth || currentMonth.yearMonth !== yearMonth) {
+            currentMonth = { yearMonth, name: monthName, days: [] };
+            months.push(currentMonth);
+        }
+        currentMonth.days.push(new Date(d));
+    });
+
+    // 2. 计算最大行数（所有月份中天数最多的那个的天数）
+    let maxDays = 0;
+    months.forEach((m) => {
+        if (m.days.length > maxDays) maxDays = m.days.length;
+    });
+
+    // 3. 构建考勤数据映射
     const attMap = {};
     for (const a of (attendanceData || [])) {
         const key = a.student_id + '_' + a.date;
@@ -389,69 +520,197 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
     }
 
     const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('考勤表');
+    const ws = wb.addWorksheet('请假表');
 
     const thinBorder = { style: 'thin', color: { argb: 'FF000000' } };
     const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
+    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2F3' } };
 
-    // 表头
-    ws.getCell(1, 1).value = '序号';
-    ws.getCell(1, 2).value = '学号';
-    ws.getCell(1, 3).value = '姓名';
-    dates.forEach((d, i) => {
-        ws.getCell(1, 4 + i).value = d;
-    });
+    const weekDayNames = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+    const monthCols = 7; // 每个月占据7列：日期、星期、迟到时间、旷课时间、请假原因、请假时长、请假单
 
-    const headerRow = ws.getRow(1);
-    for (let ci = 1; ci <= 3 + dates.length; ci++) {
-        const cell = headerRow.getCell(ci);
-        cell.font = { bold: true, size: 10 };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = allBorders;
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2F3' } };
-    }
-    headerRow.height = 30;
+    // ===== 4. 填充每个学生的数据 =====
+    students.forEach((s, studentIndex) => {
+        const startRow = 1 + studentIndex * (maxDays + 2); // 每个学生占 (maxDays+2) 行：标题行、列标题行、maxDays个数据行
 
-    students.forEach((s, si) => {
-        const r = ws.getRow(si + 2);
-        r.getCell(1).value = si + 1;
-        r.getCell(2).value = s.student_id;
-        r.getCell(3).value = s.name;
+        // 第1行：A1显示“姓名”，B1到...合并显示学生姓名
+        const titleRow = ws.getRow(startRow);
+        // A1：姓名
+        const a1Cell = titleRow.getCell(1);
+        a1Cell.value = '姓名';
+        a1Cell.font = { bold: true, size: 10 };
+        a1Cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        a1Cell.border = allBorders;
+        a1Cell.fill = headerFill;
 
-        dates.forEach((d, di) => {
-            const key = s.id + '_' + d;
-            const att = attMap[key];
-            const cell = r.getCell(4 + di);
-            let display = '';
-            if (att) {
-                switch (att.status) {
-                    case 'present': display = '✓'; break;
-                    case 'absent': display = '✗'; break;
-                    case 'late': display = '迟到(' + (att.late_time || '') + ')'; break;
-                    case 'leave': display = '请假(' + (att.leave_type || '') + ')'; break;
-                    default: display = att.status;
-                }
-            }
-            cell.value = display;
-            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        // B1到最后：学生姓名（合并）
+        const b1Cell = titleRow.getCell(2);
+        b1Cell.value = s.name;
+        b1Cell.font = { size: 10 };
+        b1Cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        b1Cell.border = allBorders;
+        const totalCols = 1 + months.length * monthCols;
+        for (let c = 2; c <= totalCols; c++) {
+            const cell = titleRow.getCell(c);
             cell.border = allBorders;
-            if (att && att.status === 'absent') {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC7CE' } };
-            }
-        });
-
-        for (let ci = 1; ci <= 3; ci++) {
-            r.getCell(ci).alignment = { horizontal: 'center', vertical: 'middle' };
-            r.getCell(ci).border = allBorders;
         }
-        r.height = 22;
+        ws.mergeCells(startRow, 2, startRow, totalCols);
+        titleRow.height = 30;
+
+        // 第2行：A2开始列名，每个月重复
+        const headerRow = ws.getRow(startRow + 1);
+        // A2显示"月份"
+        headerRow.getCell(1).value = '月份';
+        headerRow.getCell(1).font = { bold: true, size: 10 };
+        headerRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        headerRow.getCell(1).border = allBorders;
+        headerRow.getCell(1).fill = headerFill;
+
+        // 每个月的列标题（去掉重复的"月份"，因为A2已经有了）
+        const monthHeaders = ['日期', '星期', '迟到时间', '旷课时间', '请假原因', '请假时长', '请假单'];
+        let colIndex = 2;
+        months.forEach((m) => {
+            monthHeaders.forEach((h, hi) => {
+                const cell = headerRow.getCell(colIndex + hi);
+                cell.value = h;
+                cell.font = { bold: true, size: 10 };
+                cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                cell.border = allBorders;
+                cell.fill = headerFill;
+            });
+            colIndex += 7; // 现在每个月7列了
+        });
+        headerRow.height = 30;
+
+        // 第3行到第 maxDays+2 行：数据行
+        for (let dayIndex = 0; dayIndex < maxDays; dayIndex++) {
+            const rowNum = startRow + 2 + dayIndex;
+            const row = ws.getRow(rowNum);
+
+            // A列：预留，后面填充月份并合并
+            row.getCell(1).border = allBorders;
+            row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+            row.getCell(1).font = { size: 10 };
+
+            // 每个月的数据列
+            let cIndex = 2;
+            months.forEach((m) => {
+                const day = m.days[dayIndex]; // 取这个月第 dayIndex 天，如果没有就是 undefined
+
+                // 日期列（原来是cIndex+1，现在是cIndex）
+                const dateCell = row.getCell(cIndex);
+                if (day) {
+                    dateCell.value = (day.getMonth() + 1) + '月' + day.getDate() + '日';
+                }
+                dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                dateCell.border = allBorders;
+                dateCell.font = { size: 10 };
+
+                // 星期列（原来是cIndex+2，现在是cIndex+1）
+                const weekCell = row.getCell(cIndex + 1);
+                if (day) {
+                    weekCell.value = weekDayNames[day.getDay()];
+                }
+                weekCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                weekCell.border = allBorders;
+                weekCell.font = { size: 10 };
+
+                // 查找这一天的考勤数据
+                let att = null;
+                if (day) {
+                    const dateStr = day.toISOString().slice(0, 10);
+                    const key = s.id + '_' + dateStr;
+                    att = attMap[key];
+                }
+
+                // 迟到时间（原来是cIndex+3，现在是cIndex+2）
+                const lateCell = row.getCell(cIndex + 2);
+                if (att && att.late_time) {
+                    const minutes = timeToMinutes(att.late_time);
+                    if (minutes !== null) {
+                        lateCell.value = `${minutes}分钟`;
+                    } else {
+                        lateCell.value = att.late_time;
+                    }
+                }
+                lateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                lateCell.border = allBorders;
+                lateCell.font = { size: 10 };
+
+                // 旷课时间（原来是cIndex+4，现在是cIndex+3）
+                const absentCell = row.getCell(cIndex + 3);
+                if (att && att.absent_time) {
+                    const minutes = timeToMinutes(att.absent_time);
+                    if (minutes !== null) {
+                        absentCell.value = `${minutes}分钟`;
+                    } else {
+                        absentCell.value = att.absent_time;
+                    }
+                }
+                absentCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                absentCell.border = allBorders;
+                absentCell.font = { size: 10 };
+
+                // 请假原因（原来是cIndex+5，现在是cIndex+4）
+                const reasonCell = row.getCell(cIndex + 4);
+                if (att && (att.leave_type || att.remark)) {
+                    reasonCell.value = att.leave_type || att.remark || '';
+                }
+                reasonCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                reasonCell.border = allBorders;
+                reasonCell.font = { size: 10 };
+
+                // 请假时长（原来是cIndex+6，现在是cIndex+5）
+                const durationCell = row.getCell(cIndex + 5);
+                if (att && att.leave_duration) {
+                    durationCell.value = att.leave_duration;
+                }
+                durationCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                durationCell.border = allBorders;
+                durationCell.font = { size: 10 };
+
+                // 请假单（原来是cIndex+7，现在是cIndex+6）
+                const noteCell = row.getCell(cIndex + 6);
+                if (att && att.leave_with_note === '1') {
+                    noteCell.value = '✓';
+                }
+                noteCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                noteCell.border = allBorders;
+                noteCell.font = { size: 10 };
+
+                cIndex += 7; // 现在每个月7列
+            });
+
+            row.height = 22;
+        }
+
+        // 填充A列的月份并合并单元格
+        let currentAStart = startRow + 2;
+        months.forEach((m) => {
+            // 第一个数据行写入月份
+            if (m.days.length > 0) {
+                ws.getCell(currentAStart, 1).value = m.name;
+            }
+            // 合并月份单元格
+            if (m.days.length > 1) {
+                ws.mergeCells(currentAStart, 1, currentAStart + m.days.length - 1, 1);
+            }
+            currentAStart += m.days.length;
+        });
     });
 
-    ws.getColumn(1).width = 6;
-    ws.getColumn(2).width = 14;
-    ws.getColumn(3).width = 10;
-    dates.forEach((d, di) => {
-        ws.getColumn(4 + di).width = 12;
+    // ===== 5. 设置列宽 =====
+    ws.getColumn(1).width = 8; // A列月份
+    let colIdx = 2;
+    months.forEach(() => {
+        ws.getColumn(colIdx).width = 10;     // 日期
+        ws.getColumn(colIdx + 1).width = 8;  // 星期
+        ws.getColumn(colIdx + 2).width = 10; // 迟到时间
+        ws.getColumn(colIdx + 3).width = 10; // 旷课时间
+        ws.getColumn(colIdx + 4).width = 12; // 请假原因
+        ws.getColumn(colIdx + 5).width = 10; // 请假时长
+        ws.getColumn(colIdx + 6).width = 8;  // 请假单
+        colIdx += 7; // 现在每个月7列
     });
 
     const buf = await wb.xlsx.writeBuffer();

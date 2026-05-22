@@ -59,6 +59,17 @@ function createWorker() {
         processNextTask();
     });
 
+    worker.on('error', (err) => {
+        console.error('[Worker] 错误:', err);
+        const callback = workerInfo._callback;
+        workerInfo._callback = null;
+        workerInfo.busy = false;
+        availableWorkers.push(workerInfo);
+        failed++;
+        if (callback) callback(err);
+        processNextTask();
+    });
+
     worker.on('exit', (code) => {
         if (code !== 0) {
             console.error(`[Worker] 异常退出 (code: ${code})，重新启动...`);
@@ -67,7 +78,8 @@ function createWorker() {
             if (index !== -1) workers.splice(index, 1);
             const availIndex = availableWorkers.indexOf(workerInfo);
             if (availIndex !== -1) availableWorkers.splice(availIndex, 1);
-            createWorker();
+            // 延迟一点再创建，避免立即失败循环
+            setTimeout(createWorker, 1000);
         }
     });
 }
@@ -78,6 +90,8 @@ function destroyWorker() {
         const workerInfo = availableWorkers.pop();
         const index = workers.indexOf(workerInfo);
         if (index !== -1) workers.splice(index, 1);
+        // 先移除事件监听器，避免 terminate 触发 exit 后又重新创建
+        workerInfo.worker.removeAllListeners();
         workerInfo.worker.terminate();
     }
 }
