@@ -191,6 +191,8 @@ async function loadStudents(classId) {
 
 document.getElementById('classSelect').addEventListener('change', function() {
     const classId = this.value;
+    window.currentClassId = classId; // 设置全局变量
+    window.currentStudentId = null; // 清空学生ID
     const studentSelect = document.getElementById('studentSelect');
     const container = document.getElementById('chartContainer');
     studentSelect.innerHTML = '<option value="">请选择学生</option>';
@@ -217,6 +219,7 @@ document.getElementById('classSelect').addEventListener('change', function() {
 
 document.getElementById('studentSelect').addEventListener('change', function() {
     const studentId = this.value;
+    window.currentStudentId = studentId; // 设置全局变量
     if (!studentId) {
         document.getElementById('studentInfo').style.display = 'none';
         document.getElementById('subjectSelect').style.display = 'none';
@@ -569,6 +572,8 @@ async function loadStudentSelfDetail() {
             return;
         }
         const studentId = studentData.data[0].id;
+        window.currentStudentId = studentId; // 设置全局变量
+        window.currentClassId = studentData.data[0].class_id; // 设置班级ID
 
         const res = await fetch(`/api/analysis/student-detail?student_id=${studentId}`);
         const data = await res.json();

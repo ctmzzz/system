@@ -420,68 +420,13 @@
         </div>
     </div>
 
-    
 
     <!-- Toast 提示 -->
     <div class="toast" id="toast"></div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/collab.js"></script>
-    <script>
-        // 内联的 renderUsers 函数，确保按钮显示
-        window.renderUsers = function(users) {
-            const tbody = document.getElementById('usersTable');
-            if (!users || users.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-secondary);">暂无数据</td></tr>';
-                return;
-            }
-            const ROLE_LABELS = { 'admin': '管理员', 'teacher': '教师', 'class': '班级', 'student': '学生', 'course': '课程管理员' };
-            tbody.innerHTML = users.map(user => `
-                <tr>
-                    <td>${user.employee_id}</td>
-                    <td>${user.name}</td>
-                    <td>${user.plain_password || '-'}</td>
-                    <td>${ROLE_LABELS[user.role] || '教师'}</td>
-                    <td>
-                        <div class="action-btns">
-                            <button class="action-btn edit" onclick="editUser(${user.id}, '${user.employee_id}', '${user.name}', '${user.role}', '${user.plain_password || ''}')" title="编辑" style="background:#E0F2FE;">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#0284C7"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-                            </button>
-                            ${user.employee_id === 'admin' ? '' : `
-                            <button class="action-btn" onclick="markAsAbnormal('${user.employee_id}', '${user.name}')" title="标记异常" style="background:#FEE2E2;color:#EF4444;">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#EF4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                            </button>
-                            <button class="action-btn delete" onclick="deleteUser(${user.id})" title="删除" style="background:#FEE2E2;">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="#EF4444"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                            </button>`}
-                        </div>
-                    </td>
-                </tr>
-            `).join('');
-        };
-
-        // 内联的 markAsAbnormal 函数
-        window.markAsAbnormal = async function(employeeId, name) {
-            if (!confirm(`确定要将账号 ${name} (${employeeId}) 标记为异常吗？\n\n标记后该账号将无法登录！`)) return;
-            try {
-                const res = await fetch('/api/abnormal-accounts/add', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ employee_id: employeeId, name: name })
-                });
-                const data = await res.json();
-                if (data.success) {
-                    alert('已标记为异常');
-                    loadUsers();
-                } else {
-                    alert(data.message || '操作失败');
-                }
-            } catch (err) {
-                alert('操作失败');
-            }
-        };
-    </script>
-    <script src="/js/admin.js?v=2"></script>
+    <script src="/js/admin.js?v=3"></script>
     <script>
         // 文件上传区域点击事件
         document.getElementById('userFileUploadArea').addEventListener('click', function() {
@@ -544,7 +489,7 @@
             idEl.style.borderColor = '';
             return true;
         }
-    
+
         function openInlineModal(id){
             const el = document.getElementById(id);
             el.style.display = "flex";

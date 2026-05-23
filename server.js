@@ -979,6 +979,37 @@ app.post('/api/users', requireAuth, async (req, res) => {
     res.json({ success: true, message: '添加成功', id: result.lastInsertRowid });
 });
 
+// 编辑用户
+app.put('/api/users/:id', requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { employee_id, password, name, role } = req.body;
+
+    if (!employee_id || !password || !name) {
+        return res.status(400).json({ success: false, message: '请填写完整信息' });
+    }
+
+    const validRoles = ['admin', 'teacher', 'student', 'class', 'course'];
+    const userRole = validRoles.includes(role) ? role : 'teacher';
+
+    const idCheck = validateAccountId(String(employee_id), userRole);
+    if (!idCheck.valid) {
+        return res.status(400).json({ success: false, message: idCheck.message });
+    }
+
+    const existing = await database.get('SELECT * FROM users WHERE employee_id = ? AND id != ?', [employee_id, id]);
+    if (existing) {
+        return res.status(400).json({ success: false, message: '工号/学号已被其他用户使用' });
+    }
+
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    await database.run('UPDATE users SET employee_id = ?, password = ?, plain_password = ?, name = ?, role = ? WHERE id = ?',
+        [employee_id, hashedPassword, password, name, userRole, id]);
+    logEvent('编辑用户', req, `id=${id}, 账号=${employee_id}, 姓名=${name}, 角色=${userRole}`);
+
+    res.json({ success: true, message: '修改成功' });
+});
+
 // 批量导入用户
 app.post('/api/users/batch', requireAuth, async (req, res) => {
     const { users } = req.body;
@@ -3575,6 +3606,1240 @@ app.get('/api/student/period-stats', requireAuth, async (req, res) => {
     }
 });
 
+// ===== AI 主动分析上下文接口 =====
+app.get('/api/ai/context', requireAuth, async (req, res) => {
+    try {
+        const user = req.session.user;
+        const role = user.role;
+        const page = req.query.page || '';
+        const selection = req.query;
+        let contextText = '';
+
+        if (role === 'teacher') {
+            contextText = await buildTeacherContext(user, page, selection);
+        } else if (role === 'student') {
+            contextText = await buildStudentContext(user, page, selection);
+        }
+
+        res.json({ success: true, data: { role, page, context: contextText } });
+    } catch (err) {
+        console.error('AI上下文采集失败:', err);
+        res.status(500).json({ success: false, message: 'AI上下文采集失败' });
+    }
+});
+
+async function buildTeacherContext(user, page, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    if (page === '/dashboard' || page === '/') {
+        return await buildDashboardContext(user, selection);
+    } else if (page === '/detail-analysis') {
+        return await buildDetailAnalysisContext(user, selection);
+    } else if (page === '/events') {
+        return await buildEventsContext(user, selection);
+    } else if (page === '/total-table') {
+        return await buildTotalTableContext(user, selection);
+    } else if (page === '/homework-data') {
+        return await buildHomeworkDataContext(user, selection);
+    } else {
+        return await buildDefaultTeacherContext(user);
+    }
+}
+
+async function buildDashboardContext(user, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    const examId = selection.exam_id;
+    const classId = selection.class_id;
+
+    if (!examId || !classId) {
+        return buildDefaultTeacherContext(user);
+    }
+
+    const exam = await database.get('SELECT * FROM exams WHERE id = ?', [examId]);
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
+
+    if (!exam || !classInfo) {
+        return buildDefaultTeacherContext(user);
+    }
+
+    lines.push(`【当前页面】成绩分析`);
+    lines.push(`【当前考试】${exam.name}（${exam.date}）`);
+    lines.push(`【当前班级】${classInfo.name}`);
+    lines.push('');
+
+    const stats = await database.get(`
+        SELECT COUNT(DISTINCT sc.student_id) as student_count,
+               ROUND(AVG(CAST(sc.total_score AS REAL)), 1) as avg_score,
+               ROUND(MAX(CAST(sc.total_score AS REAL)), 1) as max_score,
+               ROUND(MIN(CAST(sc.total_score AS REAL)), 1) as min_score
+        FROM scores sc
+        JOIN students s ON sc.student_id = s.id
+        WHERE s.class_id = ? AND sc.exam_id = ?
+          AND sc.total_score NOT IN ('缺考', '免修')
+          AND CAST(sc.total_score AS REAL) > 0
+    `, [classId, examId]);
+
+    if (stats && stats.student_count > 0) {
+        lines.push(`【班级成绩统计】参考${stats.student_count}人，平均分${stats.avg_score}，最高${stats.max_score}，最低${stats.min_score}`);
+        lines.push('');
+
+        const subjectStats = await database.all(`
+            SELECT sc.subject,
+                   ROUND(AVG(CAST(sc.total_score AS REAL)), 1) as avg_score,
+                   COUNT(*) as cnt
+            FROM scores sc
+            JOIN students s ON sc.student_id = s.id
+            WHERE s.class_id = ? AND sc.exam_id = ?
+              AND sc.total_score NOT IN ('缺考', '免修')
+              AND CAST(sc.total_score AS REAL) > 0
+            GROUP BY sc.subject
+            ORDER BY sc.subject
+        `, [classId, examId]);
+
+        if (subjectStats.length > 0) {
+            const parts = subjectStats.map(sub => `${sub.subject}均分${sub.avg_score}`);
+            lines.push(`【各科均分】${parts.join('，')}`);
+            lines.push('');
+        }
+
+        const topStudents = await database.all(`
+            SELECT s.name, s.student_id,
+                   ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total
+            FROM scores sc
+            JOIN students s ON sc.student_id = s.id
+            WHERE s.class_id = ? AND sc.exam_id = ?
+              AND sc.total_score NOT IN ('缺考', '免修')
+              AND CAST(sc.total_score AS REAL) > 0
+            GROUP BY s.id
+            ORDER BY total DESC
+            LIMIT 5
+        `, [classId, examId]);
+
+        if (topStudents.length > 0) {
+            const topParts = topStudents.map((s, i) => `第${i + 1}名：${s.name}(${s.student_id}) 总分${s.total}`);
+            lines.push(`【前5名】${topParts.join('；')}`);
+            lines.push('');
+        }
+
+        const bottomStudents = await database.all(`
+            SELECT s.name, s.student_id,
+                   ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total
+            FROM scores sc
+            JOIN students s ON sc.student_id = s.id
+            WHERE s.class_id = ? AND sc.exam_id = ?
+              AND sc.total_score NOT IN ('缺考', '免修')
+              AND CAST(sc.total_score AS REAL) > 0
+            GROUP BY s.id
+            ORDER BY total ASC
+            LIMIT 5
+        `, [classId, examId]);
+
+        if (bottomStudents.length > 0) {
+            const bottomParts = bottomStudents.map((s, i) => `${s.name}(${s.student_id}) 总分${s.total}`);
+            lines.push(`【后5名】${bottomParts.join('；')}`);
+            lines.push('');
+        }
+    }
+
+    lines.push('【你的任务】');
+    lines.push('你是一位经验丰富的教育数据分析师。请基于以上班级成绩数据，为这位班主任老师提供：');
+    lines.push('1. 简要概述当前班级学生成绩的整体情况和特点；');
+    lines.push('2. 指出需要重点关注的学生；');
+    lines.push('3. 给出具体的督促学生学习的管理建议和教学策略。');
+    lines.push('请用中文回答，语言专业但亲切，控制在300字以内。注意：输出文本结尾不要加上"柯宇"这个教师名字。');
+
+    return lines.join('\n');
+}
+
+async function buildDetailAnalysisContext(user, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    const classId = selection.class_id;
+    const studentId = selection.student_id;
+
+    if (!classId || !studentId) {
+        lines.push('【提示】请先在页面上选择班级和学生，我才能为您提供分析服务。');
+        lines.push('');
+        lines.push('【你的任务】请提示用户先选择班级和学生，不要进行任何分析。');
+        return lines.join('\n');
+    }
+
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
+    const student = await database.get('SELECT * FROM students WHERE id = ?', [studentId]);
+
+    if (!classInfo || !student) {
+        lines.push('【提示】请先在页面上选择班级和学生，我才能为您提供分析服务。');
+        lines.push('');
+        lines.push('【你的任务】请提示用户先选择班级和学生，不要进行任何分析。');
+        return lines.join('\n');
+    }
+
+    lines.push(`【当前页面】详细汇总`);
+    lines.push(`【当前班级】${classInfo.name}`);
+    lines.push(`【当前学生】${student.name}，学号：${student.student_id}`);
+    lines.push('');
+
+    // 查询所有考试成绩
+    const allScores = await database.all(`
+        SELECT e.name as exam_name, e.date as exam_date, s.subject, CAST(s.total_score AS REAL) as score
+        FROM scores s
+        JOIN exams e ON s.exam_id = e.id
+        WHERE s.student_id = ?
+          AND s.total_score NOT IN ('缺考', '免修')
+          AND CAST(s.total_score AS REAL) > 0
+        ORDER BY e.date DESC, s.subject
+    `, [studentId]);
+
+    if (allScores.length > 0) {
+        lines.push('【所有学期成绩数据】');
+        
+        // 按学科汇总
+        const subjectStats = {};
+        allScores.forEach(score => {
+            if (!subjectStats[score.subject]) {
+                subjectStats[score.subject] = { scores: [], count: 0, total: 0 };
+            }
+            subjectStats[score.subject].scores.push(score);
+            subjectStats[score.subject].count++;
+            subjectStats[score.subject].total += score.score;
+        });
+
+        for (const subject in subjectStats) {
+            const stats = subjectStats[subject];
+            const avg = (stats.total / stats.count).toFixed(1);
+            const max = Math.max(...stats.scores.map(s => s.score)).toFixed(1);
+            const min = Math.min(...stats.scores.map(s => s.score)).toFixed(1);
+            lines.push(`${subject}：共${stats.count}次考试，平均分${avg}，最高分${max}，最低分${min}`);
+        }
+        lines.push('');
+
+        // 按考试展示详细成绩
+        const examMap = {};
+        allScores.forEach(score => {
+            const key = `${score.exam_name}_${score.exam_date}`;
+            if (!examMap[key]) {
+                examMap[key] = { name: score.exam_name, date: score.exam_date, scores: [] };
+            }
+            examMap[key].scores.push(score);
+        });
+
+        lines.push('【历次考试详情】');
+        const exams = Object.values(examMap).sort((a, b) => new Date(b.date) - new Date(a.date));
+        for (const exam of exams.slice(0, 5)) { // 最多显示最近5次
+            const scoreParts = exam.scores.map(s => `${s.subject}${s.score}分`);
+            const total = exam.scores.reduce((sum, s) => sum + s.score, 0).toFixed(1);
+            lines.push(`${exam.name}（${exam.date}）：${scoreParts.join('，')}，总分${total}`);
+        }
+        if (exams.length > 5) {
+            lines.push(`...还有${exams.length - 5}次考试记录`);
+        }
+        lines.push('');
+    } else {
+        lines.push('暂无考试成绩数据。');
+        lines.push('');
+    }
+
+    // 查询作业未提交记录
+    const allHomeworkMissing = await database.all(`
+        SELECT date, subject, semester
+        FROM homework_data
+        WHERE student_id = ? AND submitted = 0
+        ORDER BY date DESC
+    `, [studentId]);
+
+    if (allHomeworkMissing.length > 0) {
+        lines.push('【作业未提交记录】');
+        
+        // 按学科统计
+        const hwSubjectStats = {};
+        allHomeworkMissing.forEach(hw => {
+            if (!hwSubjectStats[hw.subject]) {
+                hwSubjectStats[hw.subject] = 0;
+            }
+            hwSubjectStats[hw.subject]++;
+        });
+
+        for (const subject in hwSubjectStats) {
+            lines.push(`${subject}：缺交${hwSubjectStats[subject]}次`);
+        }
+        lines.push('');
+
+        // 展示最近的未提交记录
+        lines.push('【最近缺交作业详情】');
+        allHomeworkMissing.slice(0, 10).forEach(hw => {
+            lines.push(`${hw.date}：${hw.subject}${hw.semester ? '（' + hw.semester + '）' : ''}`);
+        });
+        if (allHomeworkMissing.length > 10) {
+            lines.push(`...还有${allHomeworkMissing.length - 10}条记录`);
+        }
+        lines.push('');
+    } else {
+        lines.push('【作业情况】暂无未提交作业记录，表现很好！');
+        lines.push('');
+    }
+
+    lines.push('【你的任务】');
+    lines.push('你是一位经验丰富的教育数据分析师。请基于以上学生的所有学期成绩数据和作业记录，为这位班主任老师提供：');
+    lines.push('1. 首先概述该学生的整体学习情况');
+    lines.push('2. 分析各学科的成绩表现，指出优势学科和需要加强的学科');
+    lines.push('3. 如果有多次考试成绩，分析成绩趋势（进步/退步/稳定）');
+    lines.push('4. 分析作业完成情况，如果有缺交记录给出针对性建议');
+    lines.push('5. 肯定做得好的方面，指出需要改进的地方');
+    lines.push('6. 给出具体的学习改进建议和教育策略');
+    lines.push('请用中文回答，语言专业但亲切，控制在300字以内。注意：输出文本结尾不要加上"柯宇"这个教师名字。');
+
+    return lines.join('\n');
+}
+
+async function buildEventsContext(user, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    const year = parseInt(selection.year) || new Date().getFullYear();
+    const month = parseInt(selection.month) || new Date().getMonth() + 1;
+
+    lines.push(`【当前页面】事件`);
+    lines.push(`【当前月份】${year}年${month}月`);
+    lines.push('');
+
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
+    
+    // 获取当前用户管理的班级
+    const userClassId = user.class_id;
+    // 如果没有班级ID，直接返回
+    if (!userClassId) {
+        lines.push('【当月事件统计】暂无事件记录');
+        lines.push('');
+        return lines.join('\n');
+    }
+
+    // 首先检查两个表：beauty_score_events 和 beauty_scores
+    let events = await database.all(`
+        SELECT bse.*, s.name as student_name, s.student_id, c.name as class_name
+        FROM beauty_score_events bse
+        JOIN students s ON bse.student_id = s.student_id
+        JOIN classes c ON s.class_id = c.id
+        WHERE bse.entry_date BETWEEN ? AND ? AND s.class_id = ?
+        ORDER BY bse.entry_date DESC
+    `, [startDate, endDate, userClassId]);
+
+    // 如果第一个表没有数据，尝试第二个表
+    if (!events || events.length === 0) {
+        events = await database.all(`
+            SELECT bs.*, s.name as student_name, s.student_id, c.name as class_name
+            FROM beauty_scores bs
+            JOIN students s ON bs.student_id = s.student_id
+            JOIN classes c ON s.class_id = c.id
+            WHERE bs.entry_date BETWEEN ? AND ? AND s.class_id = ?
+            ORDER BY bs.entry_date DESC
+        `, [startDate, endDate, userClassId]);
+    }
+
+    if (events && events.length > 0) {
+        const positiveEvents = events.filter(e => e.is_positive);
+        const negativeEvents = events.filter(e => !e.is_positive);
+
+        lines.push(`【当月事件统计】`);
+        lines.push(`加分事件：${positiveEvents.length}次`);
+        lines.push(`扣分事件：${negativeEvents.length}次`);
+        lines.push('');
+
+        // 显示具体的事件详情
+        lines.push(`【具体事件详情】`);
+        events.forEach(e => {
+            const eventType = e.is_positive ? '加分' : '扣分';
+            const eventName = e.event_name || e.events || '事件';
+            lines.push(`${e.entry_date} - ${e.student_name}(${e.student_id}) - ${e.class_name} - ${eventType}${e.score}分 - ${eventName}`);
+        });
+        lines.push('');
+
+        // 按学生统计
+        const studentStats = {};
+        events.forEach(e => {
+            if (!studentStats[e.student_id]) {
+                studentStats[e.student_id] = {
+                    name: e.student_name,
+                    student_id: e.student_id,
+                    class_name: e.class_name,
+                    positive_count: 0,
+                    negative_count: 0,
+                    total_score: 0
+                };
+            }
+            if (e.is_positive) {
+                studentStats[e.student_id].positive_count++;
+                studentStats[e.student_id].total_score += e.score;
+            } else {
+                studentStats[e.student_id].negative_count++;
+                studentStats[e.student_id].total_score -= e.score;
+            }
+        });
+
+        const sortedStudents = Object.values(studentStats).sort((a, b) => b.total_score - a.total_score);
+        const topStudents = sortedStudents.slice(0, 5);
+        const bottomStudents = sortedStudents.slice(-5).reverse();
+
+        if (topStudents.length > 0) {
+            lines.push(`【表现优秀学生前5名】`);
+            topStudents.forEach((s, i) => {
+                lines.push(`第${i + 1}名：${s.name}(${s.student_id}) - ${s.class_name}，总分${s.total_score}分，加分${s.positive_count}次，扣分${s.negative_count}次`);
+            });
+            lines.push('');
+        }
+
+        if (bottomStudents.length > 0) {
+            lines.push(`【需要关注学生前5名】`);
+            bottomStudents.forEach((s, i) => {
+                lines.push(`第${i + 1}名：${s.name}(${s.student_id}) - ${s.class_name}，总分${s.total_score}分，加分${s.positive_count}次，扣分${s.negative_count}次`);
+            });
+            lines.push('');
+        }
+    } else {
+        lines.push('【当月事件统计】暂无事件记录');
+        lines.push('');
+    }
+
+    return lines.join('\n');
+}
+
+async function buildTotalTableContext(user, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    // 优先使用用户自己的班级ID
+    let classId = user.class_id;
+    if (!classId) {
+        // 如果用户没有班级ID，尝试使用选择的班级ID
+        classId = selection.class_id;
+    }
+    
+    const year = parseInt(selection.year);
+    const month = parseInt(selection.month);
+
+    if (!classId) {
+        return buildDefaultTeacherContext(user);
+    }
+
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
+
+    if (!classInfo) {
+        return buildDefaultTeacherContext(user);
+    }
+
+    lines.push(`【当前页面】总表`);
+    lines.push(`【当前班级】${classInfo.name}`);
+    if (year && month) {
+        lines.push(`【当前月份】${year}年${month}月`);
+    }
+    lines.push('');
+
+    let startDate, endDate;
+    if (year && month) {
+        startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+        endDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
+    } else {
+        const now = new Date();
+        startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}`;
+    }
+
+    // 首先尝试查询 beauty_score_events 表
+    let events = await database.all(`
+        SELECT bse.*, s.name as student_name, s.student_id
+        FROM beauty_score_events bse
+        JOIN students s ON bse.student_id = s.student_id
+        WHERE s.class_id = ? AND bse.entry_date BETWEEN ? AND ?
+        ORDER BY bse.entry_date DESC
+    `, [classId, startDate, endDate]);
+    
+    // 如果第一个表没有数据，尝试第二个表
+    if (!events || events.length === 0) {
+        events = await database.all(`
+            SELECT bs.*, s.name as student_name, s.student_id
+            FROM beauty_scores bs
+            JOIN students s ON bs.student_id = s.id
+            WHERE s.class_id = ? AND bs.date BETWEEN ? AND ?
+            ORDER BY bs.date DESC
+        `, [classId, startDate, endDate]);
+    }
+
+    if (events.length > 0) {
+        const studentStats = {};
+        events.forEach(e => {
+            if (!studentStats[e.student_id]) {
+                studentStats[e.student_id] = {
+                    name: e.student_name,
+                    student_id: e.student_id,
+                    positive_count: 0,
+                    negative_count: 0,
+                    total_score: 0
+                };
+            }
+            if (e.is_positive) {
+                studentStats[e.student_id].positive_count++;
+                studentStats[e.student_id].total_score += e.score;
+            } else {
+                studentStats[e.student_id].negative_count++;
+                studentStats[e.student_id].total_score -= e.score;
+            }
+        });
+
+        const sortedByPositive = Object.values(studentStats).sort((a, b) => b.positive_count - a.positive_count);
+        const sortedByNegative = Object.values(studentStats).sort((a, b) => a.negative_count - b.negative_count);
+
+        const topPositive = sortedByPositive.slice(0, 3);
+        const leastNegative = sortedByNegative.slice(0, 3);
+
+        if (topPositive.length > 0) {
+            lines.push(`【加分最多学生前3名】`);
+            topPositive.forEach((s, i) => {
+                lines.push(`第${i + 1}名：${s.name}(${s.student_id})，加分${s.positive_count}次，总分${s.total_score}分`);
+            });
+            lines.push('');
+        }
+
+        if (leastNegative.length > 0) {
+            lines.push(`【扣分最少学生前3名】`);
+            leastNegative.forEach((s, i) => {
+                lines.push(`第${i + 1}名：${s.name}(${s.student_id})，扣分${s.negative_count}次，总分${s.total_score}分`);
+            });
+            lines.push('');
+        }
+    } else {
+        lines.push('【当月事件统计】暂无事件记录');
+        lines.push('');
+    }
+
+    return lines.join('\n');
+}
+
+async function buildHomeworkDataContext(user, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    const semester = selection.semester;
+    const classId = selection.class_id;
+    const subject = selection.subject;
+    const date = selection.date;
+
+    if (!classId) {
+        return buildDefaultTeacherContext(user);
+    }
+
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
+
+    if (!classInfo) {
+        return buildDefaultTeacherContext(user);
+    }
+
+    lines.push(`【当前页面】作业数据`);
+    lines.push(`【当前班级】${classInfo.name}`);
+    if (semester) lines.push(`【当前学期】${semester}`);
+    if (subject) lines.push(`【当前学科】${subject}`);
+    if (date) lines.push(`【当前日期】${date}`);
+    lines.push('');
+
+    let homeworkQuery = 'SELECT hd.*, s.name as student_name, s.student_id FROM homework_data hd JOIN students s ON hd.student_id = s.id WHERE s.class_id = ?';
+    let params = [classId];
+
+    if (semester) {
+        homeworkQuery += ' AND hd.semester = ?';
+        params.push(semester);
+    }
+    if (subject) {
+        homeworkQuery += ' AND hd.subject = ?';
+        params.push(subject);
+    }
+    if (date) {
+        homeworkQuery += ' AND hd.date = ?';
+        params.push(date);
+    }
+
+    const homeworkData = await database.all(homeworkQuery + ' ORDER BY hd.date DESC', params);
+
+    if (homeworkData.length > 0) {
+        const totalCount = homeworkData.length;
+        const submittedCount = homeworkData.filter(d => d.submitted).length;
+        const lateCount = homeworkData.filter(d => d.late).length;
+        const unsubmittedCount = totalCount - submittedCount;
+        const submissionRate = totalCount > 0 ? ((submittedCount / totalCount) * 100).toFixed(1) : 0;
+
+        lines.push(`【作业提交统计】`);
+        lines.push(`总记录数：${totalCount}条`);
+        lines.push(`已提交：${submittedCount}次`);
+        lines.push(`补交：${lateCount}次`);
+        lines.push(`未提交：${unsubmittedCount}次`);
+        lines.push(`提交率：${submissionRate}%`);
+        lines.push('');
+
+        const studentStats = {};
+        homeworkData.forEach(d => {
+            if (!studentStats[d.student_id]) {
+                studentStats[d.student_id] = {
+                    name: d.student_name,
+                    student_id: d.student_id,
+                    total_count: 0,
+                    submitted_count: 0,
+                    late_count: 0,
+                    unsubmitted_count: 0
+                };
+            }
+            studentStats[d.student_id].total_count++;
+            if (d.submitted) {
+                studentStats[d.student_id].submitted_count++;
+            } else {
+                studentStats[d.student_id].unsubmitted_count++;
+            }
+            if (d.late) {
+                studentStats[d.student_id].late_count++;
+            }
+        });
+
+        const sortedByUnsubmitted = Object.values(studentStats).sort((a, b) => b.unsubmitted_count - a.unsubmitted_count);
+        const needAttention = sortedByUnsubmitted.filter(s => s.unsubmitted_count > 0).slice(0, 5);
+
+        if (needAttention.length > 0) {
+            lines.push(`【需要关注学生前5名】`);
+            needAttention.forEach((s, i) => {
+                lines.push(`第${i + 1}名：${s.name}(${s.student_id})，未提交${s.unsubmitted_count}次，补交${s.late_count}次，提交率${((s.submitted_count / s.total_count) * 100).toFixed(1)}%`);
+            });
+            lines.push('');
+        }
+    } else {
+        lines.push('【作业提交统计】暂无作业数据记录');
+        lines.push('');
+    }
+
+    return lines.join('\n');
+}
+
+async function buildDefaultTeacherContext(user) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    const classes = await database.all('SELECT * FROM classes WHERE user_id = ? ORDER BY id', [user.id]);
+    lines.push(`【管辖班级】共${classes.length}个班级：${classes.map(c => c.name).join('、') || '无'}`);
+    lines.push('');
+
+    const exams = await database.all('SELECT * FROM exams ORDER BY date DESC');
+    if (exams.length > 0) {
+        const latestExam = exams[0];
+        lines.push(`【最近考试】${latestExam.name}（${latestExam.date}）`);
+        lines.push('');
+
+        for (const cls of classes) {
+            const stats = await database.get(`
+                SELECT COUNT(DISTINCT sc.student_id) as student_count,
+                       ROUND(AVG(CAST(sc.total_score AS REAL)), 1) as avg_score,
+                       ROUND(MAX(CAST(sc.total_score AS REAL)), 1) as max_score,
+                       ROUND(MIN(CAST(sc.total_score AS REAL)), 1) as min_score
+                FROM scores sc
+                JOIN students s ON sc.student_id = s.id
+                WHERE s.class_id = ? AND sc.exam_id = ?
+                  AND sc.total_score NOT IN ('缺考', '免修')
+                  AND CAST(sc.total_score AS REAL) > 0
+            `, [cls.id, latestExam.id]);
+
+            if (stats && stats.student_count > 0) {
+                lines.push(`【${cls.name}】参考${stats.student_count}人，平均分${stats.avg_score}，最高${stats.max_score}，最低${stats.min_score}`);
+
+                const subjectStats = await database.all(`
+                    SELECT sc.subject,
+                           ROUND(AVG(CAST(sc.total_score AS REAL)), 1) as avg_score,
+                           COUNT(*) as cnt
+                    FROM scores sc
+                    JOIN students s ON sc.student_id = s.id
+                    WHERE s.class_id = ? AND sc.exam_id = ?
+                      AND sc.total_score NOT IN ('缺考', '免修')
+                      AND CAST(sc.total_score AS REAL) > 0
+                    GROUP BY sc.subject
+                    ORDER BY sc.subject
+                `, [cls.id, latestExam.id]);
+
+                if (subjectStats.length > 0) {
+                    const parts = subjectStats.map(sub => `${sub.subject}均分${sub.avg_score}`);
+                    lines.push(`  各科均分：${parts.join('，')}`);
+                }
+
+                const topStudents = await database.all(`
+                    SELECT s.name, s.student_id,
+                           ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total
+                    FROM scores sc
+                    JOIN students s ON sc.student_id = s.id
+                    WHERE s.class_id = ? AND sc.exam_id = ?
+                      AND sc.total_score NOT IN ('缺考', '免修')
+                      AND CAST(sc.total_score AS REAL) > 0
+                    GROUP BY s.id
+                    ORDER BY total DESC
+                    LIMIT 5
+                `, [cls.id, latestExam.id]);
+
+                if (topStudents.length > 0) {
+                    const topParts = topStudents.map((s, i) => `第${i + 1}名：${s.name}(${s.student_id}) 总分${s.total}`);
+                    lines.push(`  前5名：${topParts.join('；')}`);
+                }
+
+                const bottomStudents = await database.all(`
+                    SELECT s.name, s.student_id,
+                           ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total
+                    FROM scores sc
+                    JOIN students s ON sc.student_id = s.id
+                    WHERE s.class_id = ? AND sc.exam_id = ?
+                      AND sc.total_score NOT IN ('缺考', '免修')
+                      AND CAST(sc.total_score AS REAL) > 0
+                    GROUP BY s.id
+                    ORDER BY total ASC
+                    LIMIT 5
+                `, [cls.id, latestExam.id]);
+
+                if (bottomStudents.length > 0) {
+                    const bottomParts = bottomStudents.map((s, i) => `${s.name}(${s.student_id}) 总分${s.total}`);
+                    lines.push(`  后5名：${bottomParts.join('；')}`);
+                }
+            }
+            lines.push('');
+        }
+
+        if (classes.length >= 2) {
+            lines.push('【班级对比分析】');
+            const classAvgs = [];
+            for (const cls of classes) {
+                const avg = await database.get(`
+                    SELECT ROUND(AVG(CAST(sc.total_score AS REAL)), 1) as avg_score
+                    FROM scores sc
+                    JOIN students s ON sc.student_id = s.id
+                    WHERE s.class_id = ? AND sc.exam_id = ?
+                      AND sc.total_score NOT IN ('缺考', '免修')
+                      AND CAST(sc.total_score AS REAL) > 0
+                `, [cls.id, latestExam.id]);
+                if (avg && avg.avg_score) {
+                    classAvgs.push({ name: cls.name, avg: avg.avg_score });
+                }
+            }
+            if (classAvgs.length >= 2) {
+                classAvgs.sort((a, b) => parseFloat(b.avg) - parseFloat(a.avg));
+                const comparison = classAvgs.map(c => `${c.name}均分${c.avg}`).join('，');
+                lines.push(`各班均分排名：${comparison}`);
+                lines.push('');
+            }
+        }
+    }
+
+    lines.push('【你的任务】');
+    lines.push('你是一位经验丰富的教育数据分析师。请基于以上班级成绩数据，为这位班主任老师提供：');
+    lines.push('1. 简要概述当前各班级学生成绩的整体情况和特点；');
+    lines.push('2. 指出需要重点关注的学生类型（如成绩落后的、偏科的、下滑的等）；');
+    lines.push('3. 给出具体的督促学生学习的管理建议和教学策略。');
+    lines.push('请用中文回答，语言专业但亲切，控制在300字以内。注意：输出文本结尾不要加上"柯宇"这个教师名字。');
+
+    return lines.join('\n');
+}
+
+async function buildPeriodStatsContext(user, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，学号：${user.employee_id}，角色：学生`);
+    lines.push('');
+
+    const startMonth = selection.start_month;
+    const endMonth = selection.end_month;
+
+    if (!startMonth || !endMonth) {
+        lines.push('【说明】请先在页面上选择时间范围，然后AI将为您提供分析建议。');
+        lines.push('');
+        lines.push('【你的任务】');
+        lines.push('你是一位关心学生成长的AI助手。请友好地提醒用户先选择时间范围，然后为其提供分析建议。');
+        lines.push('请用中文回答，语言亲切，控制在200字以内。');
+        return lines.join('\n');
+    }
+
+    lines.push(`【分析时间范围】${startMonth} 至 ${endMonth}`);
+    lines.push('');
+
+    // 获取周期统计数据
+    try {
+        const student = await database.get('SELECT * FROM students WHERE student_id = ?', [user.employee_id]);
+        if (!student) {
+            lines.push('暂无学籍信息，请联系班主任完善资料。');
+            return lines.join('\n');
+        }
+
+        const startDate = startMonth + '-01';
+        const today = new Date().toISOString().slice(0, 10);
+        const rawEndDate = endMonth + '-31';
+        const endDate = rawEndDate > today ? today : rawEndDate;
+
+        function timeToMinutes(timeStr) {
+            if (!timeStr) return 0;
+            const parts = timeStr.split(':');
+            return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+        }
+
+        const BASE_MINUTES = 7 * 60 + 50; // 7:50
+
+        // 查询考勤记录
+        const attendanceRows = await database.all(`
+            SELECT date, status, late_time, absent_time, leave_type, leave_duration
+            FROM attendance
+            WHERE student_id = ? AND date >= ? AND date <= ?
+            ORDER BY date ASC
+        `, [student.id, startDate, endDate]);
+
+        // 查询美丽学分事件
+        let beautyRows = await database.all(`
+            SELECT entry_date, score, event_name
+            FROM beauty_score_events
+            WHERE student_id = ? AND entry_date >= ? AND entry_date <= ?
+            ORDER BY entry_date ASC
+        `, [student.student_id, startDate, endDate]);
+
+        if (beautyRows.length === 0) {
+            beautyRows = await database.all(`
+                SELECT entry_date, score, events as event_name
+                FROM beauty_scores
+                WHERE student_id = ? AND entry_date >= ? AND entry_date <= ? AND events != ''
+                ORDER BY entry_date ASC
+            `, [student.student_id, startDate, endDate]);
+        }
+
+        // 查询作业数据
+        const homeworkRows = await database.all(`
+            SELECT date, subject
+            FROM homework_data
+            WHERE student_id = ? AND date >= ? AND date <= ? AND submitted = 0
+            ORDER BY date ASC
+        `, [student.id, startDate, endDate]);
+
+        // 统计考勤
+        let totalLateMinutes = 0;
+        let totalAbsentMinutes = 0;
+        let leaveCount = 0;
+        const lateDates = new Set();
+        const absentDates = new Set();
+        const leaveDates = new Set();
+        const presentDates = new Set();
+        const attendanceDetails = [];
+
+        attendanceRows.forEach(r => {
+            const lateMin = timeToMinutes(r.late_time);
+            const absentMin = timeToMinutes(r.absent_time);
+            const lateDiff = lateMin > 0 ? Math.max(0, lateMin - BASE_MINUTES) : 0;
+            const absentDiff = absentMin > 0 ? Math.max(0, absentMin - BASE_MINUTES) : 0;
+
+            if (r.status === 'late') {
+                totalLateMinutes += lateDiff;
+                lateDates.add(r.date);
+            } else if (r.status === 'absent') {
+                totalAbsentMinutes += absentDiff;
+                absentDates.add(r.date);
+            } else if (r.status === 'leave') {
+                leaveCount++;
+                leaveDates.add(r.date);
+            } else if (r.status === 'present') {
+                presentDates.add(r.date);
+            }
+
+            attendanceDetails.push({
+                date: r.date,
+                status: r.status,
+                late_time: lateDiff > 0 ? String(lateDiff) : '',
+                absent_time: absentDiff > 0 ? String(absentDiff) : '',
+                leave_type: r.leave_type || '',
+                leave_duration: r.leave_duration || ''
+            });
+        });
+
+        const normalCount = presentDates.size;
+        const homeworkMissingCount = homeworkRows.length;
+
+        lines.push('【统计数据】');
+        lines.push(`- 正常出勤：${normalCount} 次`);
+        lines.push(`- 总共迟到：${totalLateMinutes} 分钟`);
+        lines.push(`- 总共旷课：${totalAbsentMinutes} 分钟`);
+        lines.push(`- 请假：${leaveCount} 次`);
+        lines.push(`- 缺交作业：${homeworkMissingCount} 次`);
+        lines.push('');
+
+        // 组织每日数据
+        const dailyMap = new Map();
+
+        attendanceDetails.forEach(a => {
+            if (!dailyMap.has(a.date)) {
+                dailyMap.set(a.date, { date: a.date, attendance: [], beauty: [], homework: [] });
+            }
+            dailyMap.get(a.date).attendance.push(a);
+        });
+
+        beautyRows.forEach(b => {
+            if (!dailyMap.has(b.entry_date)) {
+                dailyMap.set(b.entry_date, { date: b.entry_date, attendance: [], beauty: [], homework: [] });
+            }
+            dailyMap.get(b.entry_date).beauty.push({ event_name: b.event_name, score: b.score });
+        });
+
+        homeworkRows.forEach(h => {
+            if (!dailyMap.has(h.date)) {
+                dailyMap.set(h.date, { date: h.date, attendance: [], beauty: [], homework: [] });
+            }
+            dailyMap.get(h.date).homework.push({ subject: h.subject });
+        });
+
+        const dailyRecords = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+        // 获取详细记录
+        lines.push('【详细记录】');
+
+        if (dailyRecords && dailyRecords.length > 0) {
+            for (const record of dailyRecords) {
+                const date = record.date;
+                let hasContent = false;
+                let recordText = date + '：';
+                const details = [];
+
+                if (record.attendance && record.attendance.length > 0) {
+                    for (const a of record.attendance) {
+                        if (a.status === 'late' && a.late_time) {
+                            details.push(`迟到${a.late_time}分钟`);
+                            hasContent = true;
+                        } else if (a.status === 'absent' && a.absent_time) {
+                            details.push(`旷课${a.absent_time}分钟`);
+                            hasContent = true;
+                        } else if (a.status === 'leave') {
+                            let leaveText = '请假';
+                            if (a.leave_type) leaveText += `（${a.leave_type}）`;
+                            if (a.leave_duration) leaveText += ` ${a.leave_duration}`;
+                            details.push(leaveText);
+                            hasContent = true;
+                        }
+                    }
+                }
+
+                if (record.beauty && record.beauty.length > 0) {
+                    for (const b of record.beauty) {
+                        const score = parseFloat(b.score) || 0;
+                        const prefix = score >= 0 ? '+' : '';
+                        details.push(`${b.event_name || '美丽学分'} ${prefix}${score}分`);
+                        hasContent = true;
+                    }
+                }
+
+                if (record.homework && record.homework.length > 0) {
+                    for (const h of record.homework) {
+                        details.push(`缺交${h.subject || '未知科目'}作业`);
+                        hasContent = true;
+                    }
+                }
+
+                if (hasContent) {
+                    lines.push(`- ${recordText} ${details.join('；')}`);
+                }
+            }
+        } else {
+            lines.push('- 该时间段内暂无记录');
+        }
+        lines.push('');
+    } catch (err) {
+        console.error('获取周期统计数据失败:', err);
+        lines.push('获取数据时出错，请稍后重试。');
+        lines.push('');
+    }
+
+    lines.push('【你的任务】');
+    lines.push('你是一位关心学生成长的AI助手。请基于以上学生的周期统计数据，为这位学生提供详细的分析和建议：');
+    lines.push('1. 首先概述该学生在这段时间内的整体表现情况');
+    lines.push('2. 详细分析各项数据：正常出勤次数、迟到分钟数、旷课分钟数、请假次数、缺交作业次数');
+    lines.push('3. 结合详细记录中的具体事件（如某日迟到、某日缺交作业等）进行针对性点评');
+    lines.push('4. 肯定做得好的方面，指出需要改进的地方');
+    lines.push('5. 给出具体、可行的改进建议');
+    lines.push('6. 最后给予鼓励和期望');
+    lines.push('请用中文回答，语言亲切、鼓励，内容要丰富具体，控制在300字以内。');
+
+    return lines.join('\n');
+}
+
+async function buildStudentDetailAnalysisContext(user, selection) {
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，学号：${user.employee_id}，角色：学生`);
+    lines.push('');
+
+    const student = await database.get('SELECT * FROM students WHERE student_id = ?', [user.employee_id]);
+    if (!student) {
+        lines.push('暂无学籍信息，请联系班主任完善资料。');
+        return lines.join('\n');
+    }
+
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [student.class_id]);
+    lines.push(`班级：${classInfo ? classInfo.name : '未知'}`);
+    lines.push('');
+
+    // 查询所有考试成绩
+    const allScores = await database.all(`
+        SELECT e.name as exam_name, e.date as exam_date, s.subject, CAST(s.total_score AS REAL) as score
+        FROM scores s
+        JOIN exams e ON s.exam_id = e.id
+        WHERE s.student_id = ?
+          AND s.total_score NOT IN ('缺考', '免修')
+          AND CAST(s.total_score AS REAL) > 0
+        ORDER BY e.date DESC, s.subject
+    `, [student.id]);
+
+    if (allScores.length > 0) {
+        lines.push('【所有学期成绩数据】');
+        
+        // 按学科汇总
+        const subjectStats = {};
+        allScores.forEach(score => {
+            if (!subjectStats[score.subject]) {
+                subjectStats[score.subject] = { scores: [], count: 0, total: 0 };
+            }
+            subjectStats[score.subject].scores.push(score);
+            subjectStats[score.subject].count++;
+            subjectStats[score.subject].total += score.score;
+        });
+
+        for (const subject in subjectStats) {
+            const stats = subjectStats[subject];
+            const avg = (stats.total / stats.count).toFixed(1);
+            const max = Math.max(...stats.scores.map(s => s.score)).toFixed(1);
+            const min = Math.min(...stats.scores.map(s => s.score)).toFixed(1);
+            lines.push(`${subject}：共${stats.count}次考试，平均分${avg}，最高分${max}，最低分${min}`);
+        }
+        lines.push('');
+
+        // 按考试展示详细成绩
+        const examMap = {};
+        allScores.forEach(score => {
+            const key = `${score.exam_name}_${score.exam_date}`;
+            if (!examMap[key]) {
+                examMap[key] = { name: score.exam_name, date: score.exam_date, scores: [] };
+            }
+            examMap[key].scores.push(score);
+        });
+
+        lines.push('【历次考试详情】');
+        const exams = Object.values(examMap).sort((a, b) => new Date(b.date) - new Date(a.date));
+        for (const exam of exams.slice(0, 5)) { // 最多显示最近5次
+            const scoreParts = exam.scores.map(s => `${s.subject}${s.score}分`);
+            const total = exam.scores.reduce((sum, s) => sum + s.score, 0).toFixed(1);
+            lines.push(`${exam.name}（${exam.date}）：${scoreParts.join('，')}，总分${total}`);
+        }
+        if (exams.length > 5) {
+            lines.push(`...还有${exams.length - 5}次考试记录`);
+        }
+        lines.push('');
+    } else {
+        lines.push('暂无考试成绩数据。');
+        lines.push('');
+    }
+
+    // 查询作业未提交记录
+    const allHomeworkMissing = await database.all(`
+        SELECT date, subject, semester
+        FROM homework_data
+        WHERE student_id = ? AND submitted = 0
+        ORDER BY date DESC
+    `, [student.id]);
+
+    if (allHomeworkMissing.length > 0) {
+        lines.push('【作业未提交记录】');
+        
+        // 按学科统计
+        const hwSubjectStats = {};
+        allHomeworkMissing.forEach(hw => {
+            if (!hwSubjectStats[hw.subject]) {
+                hwSubjectStats[hw.subject] = 0;
+            }
+            hwSubjectStats[hw.subject]++;
+        });
+
+        for (const subject in hwSubjectStats) {
+            lines.push(`${subject}：缺交${hwSubjectStats[subject]}次`);
+        }
+        lines.push('');
+
+        // 展示最近的未提交记录
+        lines.push('【最近缺交作业详情】');
+        allHomeworkMissing.slice(0, 10).forEach(hw => {
+            lines.push(`${hw.date}：${hw.subject}${hw.semester ? '（' + hw.semester + '）' : ''}`);
+        });
+        if (allHomeworkMissing.length > 10) {
+            lines.push(`...还有${allHomeworkMissing.length - 10}条记录`);
+        }
+        lines.push('');
+    } else {
+        lines.push('【作业情况】暂无未提交作业记录，表现很好！');
+        lines.push('');
+    }
+
+    lines.push('【你的任务】');
+    lines.push('你是一位贴心的AI学习助手。请基于以上学生的所有学期成绩数据和作业记录，为这位同学提供详细的分析和建议：');
+    lines.push('1. 首先概述该学生的整体学习情况');
+    lines.push('2. 分析各学科的成绩表现，指出优势学科和需要加强的学科');
+    lines.push('3. 如果有多次考试成绩，分析成绩趋势（进步/退步/稳定）');
+    lines.push('4. 分析作业完成情况，如果有缺交记录给出针对性建议');
+    lines.push('5. 肯定做得好的方面，指出需要改进的地方');
+    lines.push('6. 给出具体、可行的学习建议');
+    lines.push('7. 最后给予鼓励和期望');
+    lines.push('请用中文回答，用"你"称呼，语言亲切、鼓励，内容要丰富具体，控制在300字以内。');
+
+    return lines.join('\n');
+}
+
+async function buildStudentContext(user, page, selection) {
+    if (page === '/period-stats') {
+        return await buildPeriodStatsContext(user, selection);
+    }
+    if (page === '/detail-analysis') {
+        return await buildStudentDetailAnalysisContext(user, selection);
+    }
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，学号：${user.employee_id}，角色：学生`);
+    lines.push('');
+
+    const student = await database.get('SELECT * FROM students WHERE student_id = ?', [user.employee_id]);
+    if (!student) {
+        lines.push('暂无学籍信息，请联系班主任完善资料。');
+        return lines.join('\n');
+    }
+
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [student.class_id]);
+    lines.push(`班级：${classInfo ? classInfo.name : '未知'}`);
+    lines.push('');
+
+    const exams = await database.all('SELECT * FROM exams ORDER BY date DESC');
+    const examsWithData = [];
+
+    for (const exam of exams) {
+        const hasData = await database.get(`
+            SELECT COUNT(*) as cnt FROM scores
+            WHERE student_id = ? AND exam_id = ?
+              AND total_score NOT IN ('缺考', '免修')
+              AND CAST(total_score AS REAL) > 0
+        `, [student.id, exam.id]);
+        if (hasData && hasData.cnt > 0) {
+            examsWithData.push(exam);
+        }
+    }
+
+    if (examsWithData.length > 0) {
+        const latestExam = examsWithData[0];
+        lines.push(`【最近考试】${latestExam.name}（${latestExam.date}）`);
+        lines.push('');
+
+        const scores = await database.all(`
+            SELECT subject, CAST(total_score AS REAL) as score
+            FROM scores
+            WHERE student_id = ? AND exam_id = ?
+              AND total_score NOT IN ('缺考', '免修')
+              AND CAST(total_score AS REAL) > 0
+            ORDER BY subject
+        `, [student.id, latestExam.id]);
+
+        if (scores.length > 0) {
+            const total = scores.reduce((sum, s) => sum + s.score, 0);
+            const avg = total / scores.length;
+            const scoreParts = scores.map(s => `${s.subject}：${s.score}分`);
+            lines.push(`各科成绩：${scoreParts.join('，')}`);
+            lines.push(`总分为${total.toFixed(1)}分，平均分${avg.toFixed(1)}分`);
+            lines.push('');
+
+            const ranking = await database.get(`
+                SELECT COUNT(*) + 1 as rank
+                FROM (
+                    SELECT sc.student_id, SUM(CAST(sc.total_score AS REAL)) as total
+                    FROM scores sc
+                    JOIN students s ON sc.student_id = s.id
+                    WHERE s.class_id = ? AND sc.exam_id = ?
+                      AND sc.total_score NOT IN ('缺考', '免修')
+                      AND CAST(sc.total_score AS REAL) > 0
+                    GROUP BY sc.student_id
+                    HAVING total > ?
+                ) t
+            `, [student.class_id, latestExam.id, total]);
+
+            const totalStudents = await database.get(`
+                SELECT COUNT(DISTINCT student_id) as cnt
+                FROM scores
+                WHERE exam_id = ?
+                  AND total_score NOT IN ('缺考', '免修')
+                  AND CAST(total_score AS REAL) > 0
+                  AND student_id IN (SELECT id FROM students WHERE class_id = ?)
+            `, [latestExam.id, student.class_id]);
+
+            if (ranking && totalStudents && totalStudents.cnt > 0) {
+                const pct = ((ranking.rank / totalStudents.cnt) * 100).toFixed(1);
+                lines.push(`班级排名：第${ranking.rank}名/共${totalStudents.cnt}人（前${pct}%）`);
+            }
+        }
+
+        if (examsWithData.length >= 2) {
+            lines.push('');
+            lines.push('【历次考试趋势】');
+            for (const exam of examsWithData) {
+                const examTotal = await database.get(`
+                    SELECT SUM(CAST(total_score AS REAL)) as total
+                    FROM scores
+                    WHERE student_id = ? AND exam_id = ?
+                      AND total_score NOT IN ('缺考', '免修')
+                      AND CAST(total_score AS REAL) > 0
+                `, [student.id, exam.id]);
+
+                const examRank = await database.get(`
+                    SELECT COUNT(*) + 1 as rank
+                    FROM (
+                        SELECT sc.student_id, SUM(CAST(sc.total_score AS REAL)) as total
+                        FROM scores sc
+                        JOIN students s ON sc.student_id = s.id
+                        WHERE s.class_id = ? AND sc.exam_id = ?
+                          AND sc.total_score NOT IN ('缺考', '免修')
+                          AND CAST(sc.total_score AS REAL) > 0
+                        GROUP BY sc.student_id
+                        HAVING total > ?
+                    ) t
+                `, [student.class_id, exam.id, examTotal ? examTotal.total : 0]);
+
+                if (examTotal && examTotal.total > 0 && examRank) {
+                    lines.push(`${exam.name}：总分${examTotal.total.toFixed(1)}，班级第${examRank.rank}名`);
+                }
+            }
+        }
+    } else {
+        lines.push('暂无考试成绩数据。');
+    }
+
+    lines.push('');
+    lines.push('【你的任务】');
+    lines.push('你是一位贴心的AI学习助手。请基于以上学生成绩数据，为这位同学提供：');
+    lines.push('1. 简要分析当前各科成绩的整体水平；');
+    lines.push('2. 指出优势和薄弱学科；');
+    lines.push('3. 如果有多次考试成绩，分析成绩趋势（进步/退步/稳定）；');
+    lines.push('4. 给出具体的学习改进建议和努力方向。');
+    lines.push('请用中文回答，语气亲切鼓励，控制在300字以内。注意：输出文本结尾不要加上"柯宇"这个教师名字。');
+
+    return lines.join('\n');
+}
+
 // ===== Ollama AI 代理端点 =====
 app.post('/api/ollama/chat', async (req, res) => {
     try {
@@ -3582,12 +4847,8 @@ app.post('/api/ollama/chat', async (req, res) => {
         const ollamaHost = '192.168.3.6';
         const ollamaPort = 11434;
         
-        // 设置响应头
-        res.setHeader('Content-Type', stream ? 'text/event-stream' : 'application/json');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        
-        // 向后端 Ollama 发送请求
+        let headersSent = false;
+
         const ollamaReq = http.request({
             hostname: ollamaHost,
             port: ollamaPort,
@@ -3597,29 +4858,38 @@ app.post('/api/ollama/chat', async (req, res) => {
                 'Content-Type': 'application/json'
             }
         }, (ollamaRes) => {
-            // 流式转发响应
+            if (stream !== false) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+            }
+            headersSent = true;
+
             ollamaRes.on('data', (chunk) => {
                 res.write(chunk);
             });
-            
+
             ollamaRes.on('end', () => {
                 res.end();
             });
         });
-        
+
         ollamaReq.on('error', (err) => {
             console.error('Ollama 连接失败:', err);
-            res.status(500).json({ success: false, message: '无法连接到 Ollama 服务: ' + err.message });
+            if (!headersSent) {
+                res.status(500).json({ success: false, message: '无法连接到 Ollama 服务: ' + err.message });
+            } else {
+                res.end();
+            }
         });
-        
-        // 发送请求体
+
         ollamaReq.write(JSON.stringify({
-            model: model || 'qwen2.5:1.5b',
+            model: model || 'qwen2.5:3b',
             messages: messages || [],
-            stream: stream !== false  // 默认开启流式
+            stream: stream !== false
         }));
         ollamaReq.end();
-        
+
     } catch (err) {
         console.error('AI 代理错误:', err);
         res.status(500).json({ success: false, message: 'AI 代理错误: ' + err.message });

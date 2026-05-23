@@ -527,11 +527,12 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
     const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E2F3' } };
 
     const weekDayNames = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
-    const monthCols = 7; // 每个月占据7列：日期、星期、迟到时间、旷课时间、请假原因、请假时长、请假单
+    const monthCols = 8; // 每个月占据8列：月份、日期、星期、迟到时间、旷课时间、请假原因、请假时长、请假单
 
     // ===== 4. 填充每个学生的数据 =====
     students.forEach((s, studentIndex) => {
         const startRow = 1 + studentIndex * (maxDays + 2); // 每个学生占 (maxDays+2) 行：标题行、列标题行、maxDays个数据行
+        const totalCols = months.length * monthCols;
 
         // 第1行：A1显示“姓名”，B1到...合并显示学生姓名
         const titleRow = ws.getRow(startRow);
@@ -549,7 +550,6 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
         b1Cell.font = { size: 10 };
         b1Cell.alignment = { horizontal: 'center', vertical: 'middle' };
         b1Cell.border = allBorders;
-        const totalCols = 1 + months.length * monthCols;
         for (let c = 2; c <= totalCols; c++) {
             const cell = titleRow.getCell(c);
             cell.border = allBorders;
@@ -557,18 +557,11 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
         ws.mergeCells(startRow, 2, startRow, totalCols);
         titleRow.height = 30;
 
-        // 第2行：A2开始列名，每个月重复
+        // 第2行：列标题行，每个月重复8列
         const headerRow = ws.getRow(startRow + 1);
-        // A2显示"月份"
-        headerRow.getCell(1).value = '月份';
-        headerRow.getCell(1).font = { bold: true, size: 10 };
-        headerRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        headerRow.getCell(1).border = allBorders;
-        headerRow.getCell(1).fill = headerFill;
-
-        // 每个月的列标题（去掉重复的"月份"，因为A2已经有了）
-        const monthHeaders = ['日期', '星期', '迟到时间', '旷课时间', '请假原因', '请假时长', '请假单'];
-        let colIndex = 2;
+        // 每个月的列标题
+        const monthHeaders = ['月份', '日期', '星期', '迟到时间', '旷课时间', '请假原因', '请假时长', '请假单'];
+        let colIndex = 1;
         months.forEach((m) => {
             monthHeaders.forEach((h, hi) => {
                 const cell = headerRow.getCell(colIndex + hi);
@@ -578,7 +571,7 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                 cell.border = allBorders;
                 cell.fill = headerFill;
             });
-            colIndex += 7; // 现在每个月7列了
+            colIndex += monthCols;
         });
         headerRow.height = 30;
 
@@ -587,18 +580,19 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
             const rowNum = startRow + 2 + dayIndex;
             const row = ws.getRow(rowNum);
 
-            // A列：预留，后面填充月份并合并
-            row.getCell(1).border = allBorders;
-            row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-            row.getCell(1).font = { size: 10 };
-
             // 每个月的数据列
-            let cIndex = 2;
+            let cIndex = 1;
             months.forEach((m) => {
                 const day = m.days[dayIndex]; // 取这个月第 dayIndex 天，如果没有就是 undefined
 
-                // 日期列（原来是cIndex+1，现在是cIndex）
-                const dateCell = row.getCell(cIndex);
+                // 月份列
+                const monthCell = row.getCell(cIndex);
+                monthCell.alignment = { horizontal: 'center', vertical: 'middle' };
+                monthCell.border = allBorders;
+                monthCell.font = { size: 10 };
+
+                // 日期列
+                const dateCell = row.getCell(cIndex + 1);
                 if (day) {
                     dateCell.value = (day.getMonth() + 1) + '月' + day.getDate() + '日';
                 }
@@ -606,8 +600,8 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                 dateCell.border = allBorders;
                 dateCell.font = { size: 10 };
 
-                // 星期列（原来是cIndex+2，现在是cIndex+1）
-                const weekCell = row.getCell(cIndex + 1);
+                // 星期列
+                const weekCell = row.getCell(cIndex + 2);
                 if (day) {
                     weekCell.value = weekDayNames[day.getDay()];
                 }
@@ -623,8 +617,8 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                     att = attMap[key];
                 }
 
-                // 迟到时间（原来是cIndex+3，现在是cIndex+2）
-                const lateCell = row.getCell(cIndex + 2);
+                // 迟到时间
+                const lateCell = row.getCell(cIndex + 3);
                 if (att && att.late_time) {
                     const minutes = timeToMinutes(att.late_time);
                     if (minutes !== null) {
@@ -637,8 +631,8 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                 lateCell.border = allBorders;
                 lateCell.font = { size: 10 };
 
-                // 旷课时间（原来是cIndex+4，现在是cIndex+3）
-                const absentCell = row.getCell(cIndex + 3);
+                // 旷课时间
+                const absentCell = row.getCell(cIndex + 4);
                 if (att && att.absent_time) {
                     const minutes = timeToMinutes(att.absent_time);
                     if (minutes !== null) {
@@ -651,8 +645,8 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                 absentCell.border = allBorders;
                 absentCell.font = { size: 10 };
 
-                // 请假原因（原来是cIndex+5，现在是cIndex+4）
-                const reasonCell = row.getCell(cIndex + 4);
+                // 请假原因
+                const reasonCell = row.getCell(cIndex + 5);
                 if (att && (att.leave_type || att.remark)) {
                     reasonCell.value = att.leave_type || att.remark || '';
                 }
@@ -660,8 +654,8 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                 reasonCell.border = allBorders;
                 reasonCell.font = { size: 10 };
 
-                // 请假时长（原来是cIndex+6，现在是cIndex+5）
-                const durationCell = row.getCell(cIndex + 5);
+                // 请假时长
+                const durationCell = row.getCell(cIndex + 6);
                 if (att && att.leave_duration) {
                     durationCell.value = att.leave_duration;
                 }
@@ -669,8 +663,8 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                 durationCell.border = allBorders;
                 durationCell.font = { size: 10 };
 
-                // 请假单（原来是cIndex+7，现在是cIndex+6）
-                const noteCell = row.getCell(cIndex + 6);
+                // 请假单
+                const noteCell = row.getCell(cIndex + 7);
                 if (att && att.leave_with_note === '1') {
                     noteCell.value = '✓';
                 }
@@ -678,46 +672,44 @@ async function exportAttendance({ classId, startDate, endDate, studentIds, atten
                 noteCell.border = allBorders;
                 noteCell.font = { size: 10 };
 
-                cIndex += 7; // 现在每个月7列
+                cIndex += monthCols; // 每个月8列
             });
 
             row.height = 22;
         }
 
-        // 填充A列的月份并合并单元格
-        let currentAStart = startRow + 2;
-        months.forEach((m) => {
+        // 填充每个月的月份列并合并单元格
+        months.forEach((m, monthIndex) => {
+            let currentStart = startRow + 2;
+            const monthCol = 1 + monthIndex * monthCols; // 每个月的第一列
             // 第一个数据行写入月份
             if (m.days.length > 0) {
-                ws.getCell(currentAStart, 1).value = m.name;
+                ws.getCell(currentStart, monthCol).value = m.name;
             }
             // 合并月份单元格
             if (m.days.length > 1) {
-                ws.mergeCells(currentAStart, 1, currentAStart + m.days.length - 1, 1);
+                ws.mergeCells(currentStart, monthCol, currentStart + m.days.length - 1, monthCol);
             }
-            currentAStart += m.days.length;
         });
     });
 
     // ===== 5. 设置列宽 =====
-    ws.getColumn(1).width = 8; // A列月份
-    let colIdx = 2;
+    let colIdx = 1;
     months.forEach(() => {
-        ws.getColumn(colIdx).width = 10;     // 日期
-        ws.getColumn(colIdx + 1).width = 8;  // 星期
-        ws.getColumn(colIdx + 2).width = 10; // 迟到时间
-        ws.getColumn(colIdx + 3).width = 10; // 旷课时间
-        ws.getColumn(colIdx + 4).width = 12; // 请假原因
-        ws.getColumn(colIdx + 5).width = 10; // 请假时长
-        ws.getColumn(colIdx + 6).width = 8;  // 请假单
-        colIdx += 7; // 现在每个月7列
+        ws.getColumn(colIdx).width = 8;      // 月份
+        ws.getColumn(colIdx + 1).width = 10; // 日期
+        ws.getColumn(colIdx + 2).width = 8;  // 星期
+        ws.getColumn(colIdx + 3).width = 10; // 迟到时间
+        ws.getColumn(colIdx + 4).width = 10; // 旷课时间
+        ws.getColumn(colIdx + 5).width = 12; // 请假原因
+        ws.getColumn(colIdx + 6).width = 10; // 请假时长
+        ws.getColumn(colIdx + 7).width = 8;  // 请假单
+        colIdx += 8; // 每个月8列
     });
 
     const buf = await wb.xlsx.writeBuffer();
     return buf;
-}
-
-// ============ 学生详细分析（多考试多学科） ============
+}// ============ 学生详细分析（多考试多学科） ============
 async function analyzeStudentDetail({ studentId, classId }) {
     const student = await dbGet('SELECT * FROM students WHERE id = ?', [studentId]);
     if (!student) throw new Error('学生不存在');
@@ -921,3 +913,4 @@ parentPort.on('message', async (task) => {
     const result = await processTask(task);
     parentPort.postMessage(result);
 });
+

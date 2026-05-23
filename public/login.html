@@ -938,6 +938,8 @@
                         const role = data.data.role;
                         if (role === 'admin') {
                             window.location.replace('/admin');
+                        } else if (role === 'course') {
+                            window.location.replace('/course-hours');
                         } else if (role === 'class') {
                             window.location.replace('/total-table');
                         } else {
@@ -1298,9 +1300,9 @@
                             .then(r => r.json())
                             .then(authData => {
                                 if (authData.user && authData.user.role === 'admin') {
-                            window.location.href = '/admin';
-                            } else if (authData.user && authData.user.role === 'course') {
-                                window.location.href = '/course-hours';
+                                    window.location.replace('/admin');
+                                } else if (authData.user && authData.user.role === 'course') {
+                                    window.location.replace('/course-hours');
                                 } else if (authData.user && authData.user.role === 'class') {
                                     window.location.replace('/total-table');
                                 } else {
