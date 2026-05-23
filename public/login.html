@@ -1298,7 +1298,9 @@
                             .then(r => r.json())
                             .then(authData => {
                                 if (authData.user && authData.user.role === 'admin') {
-                                    window.location.replace('/admin');
+                            window.location.href = '/admin';
+                            } else if (authData.user && authData.user.role === 'course') {
+                                window.location.href = '/course-hours';
                                 } else if (authData.user && authData.user.role === 'class') {
                                     window.location.replace('/total-table');
                                 } else {

@@ -380,13 +380,14 @@ function requirePageAuth(req, res, next) {
 
 // 根据角色获取可访问的默认首页
 function getDefaultPage(role) {
-    const pages = { admin: '/admin', teacher: '/dashboard', class: '/total-table', student: '/dashboard' };
+    const pages = { admin: '/admin', teacher: '/dashboard', class: '/total-table', student: '/dashboard', course: '/course-hours' };
     return pages[role] || '/dashboard';
 }
 
 // 角色允许的页面
 const ROLE_PAGES = {
     admin:   ['/admin'],
+    course:  ['/course-hours'],
     teacher: ['/dashboard','/teacher-admin','/events','/total-table','/attendance','/detail-analysis','/homework-data','/homework-manage'],
     class:   ['/total-table','/attendance','/homework-data'],
     student: ['/dashboard','/detail-analysis','/period-stats']
@@ -404,6 +405,7 @@ function servePage(pagePath, htmlFile) {
 }
 
 app.get('/admin', ...servePage('/admin', 'admin.html'));
+app.get('/course-hours', ...servePage('/course-hours', 'course-hours.html'));
 app.get('/dashboard', ...servePage('/dashboard', 'dashboard.html'));
 app.get('/teacher-admin', ...servePage('/teacher-admin', 'teacher-admin.html'));
 app.get('/events', ...servePage('/events', 'events.html'));
@@ -546,13 +548,14 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
         // 获取关联班级ID
         const classInfo = await findOrCreateClass(employee_id);
 
-        // 班级账号：允许多端登录（最多2个连接）
+        // 根据实际角色决定多端登录限制
+        const maxSessions = user.role === 'class' ? CLASS_MAX_SESSIONS : 1;
         const currentSessions = getSessionCount(user.id);
-        if (currentSessions >= CLASS_MAX_SESSIONS) {
-            logEvent(`班级账号 ${user.name}(${employee_id}) 已达最大连接数 ${CLASS_MAX_SESSIONS}，拒绝新登录`, req);
+        if (currentSessions >= maxSessions) {
+            logEvent(`${user.role === 'class' ? '班级账号' : '账号'} ${user.name}(${employee_id}) 已达最大连接数 ${maxSessions}，拒绝新登录`, req);
             return res.status(429).json({
                 success: false,
-                message: `拒绝登录:该班级账号已有 ${CLASS_MAX_SESSIONS} 个设备在线`
+                message: `拒绝登录:该账号已有 ${maxSessions} 个设备在线`
             });
         }
 
@@ -560,7 +563,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
             id: user.id,
             employee_id: user.employee_id,
             name: user.name,
-            role: 'class',
+            role: user.role,
             class_id: classInfo.classId
         };
         req.session.lastActivityAt = Date.now();
@@ -905,6 +908,13 @@ function requireAuth(req, res, next) {
     next();
 }
 
+function requireCourseManager(req, res, next) {
+    if (!req.session.user || req.session.user.role !== 'course') {
+        return res.status(403).json({ success: false, message: '仅课程管理员可操作' });
+    }
+    next();
+}
+
 // ============ 账号格式校验 ============
 function validateAccountId(employee_id, role) {
     if (!employee_id || typeof employee_id !== 'string') {
@@ -914,7 +924,8 @@ function validateAccountId(employee_id, role) {
         teacher:  { pattern: /^\d{4}$/, msg: '教师账号必须为4位数字' },
         student:  { pattern: /^\d{10}$/, msg: '学生学号必须为10位数字' },
         class:    { pattern: /^\d{5}$/, msg: '班级账号必须为5位数字' },
-        admin:     { pattern: /^.{1,20}$/, msg: '' } // 管理员不限
+        admin:     { pattern: /^.{1,20}$/, msg: '' }, // 管理员不限
+        course:    { pattern: /^.{1,20}$/, msg: '' }  // 课程管理员不限
     };
     const rule = rules[role] || rules.admin;
     if (!rule.pattern.test(employee_id)) {
@@ -946,7 +957,7 @@ app.post('/api/users', requireAuth, async (req, res) => {
     }
 
     // 校验角色
-    const validRoles = ['admin', 'teacher', 'student', 'class'];
+    const validRoles = ['admin', 'teacher', 'student', 'class', 'course'];
     const userRole = validRoles.includes(role) ? role : 'teacher';
 
     // 校验账号格式
@@ -982,7 +993,7 @@ app.post('/api/users/batch', requireAuth, async (req, res) => {
         for (const item of users) {
             try {
                 if (item.employee_id && item.password && item.name) {
-                    const roleMap = { '教师': 'teacher', '管理员': 'admin', '学生': 'student', '班级': 'class', 'teacher': 'teacher', 'admin': 'admin', 'student': 'student', 'class': 'class' };
+                    const roleMap = { '教师': 'teacher', '管理员': 'admin', '学生': 'student', '班级': 'class', '课程管理员': 'course', '课程': 'course', 'teacher': 'teacher', 'admin': 'admin', 'student': 'student', 'class': 'class', 'course': 'course' };
                     const userRole = roleMap[item.role] || 'teacher';
 
                     // 校验账号格式
@@ -1044,6 +1055,484 @@ app.delete('/api/users/:id', requireAuth, async (req, res) => {
         console.error('删除用户失败:', err);
         res.status(500).json({ success: false, message: '删除失败: ' + err.message });
     }
+});
+
+function normalizeCourseHeader(value) {
+    return String(value || '').trim().replace(/\s+/g, '').replace(/[()（）:：]/g, '').toLowerCase();
+}
+
+function findCourseColumn(headers, aliases) {
+    for (const alias of aliases) {
+        const idx = headers.indexOf(normalizeCourseHeader(alias));
+        if (idx !== -1) return idx + 1;
+    }
+    return 0;
+}
+
+function readCourseCell(row, col) {
+    if (!col) return '';
+    const cell = row.getCell(col);
+    const value = cell.value;
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date) {
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, '0');
+        const d = String(value.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    if (typeof value === 'object') {
+        if (value.text) return String(value.text).trim();
+        if (value.result !== undefined) return String(value.result).trim();
+        if (Array.isArray(value.richText)) return value.richText.map(t => t.text || '').join('').trim();
+    }
+    return String(value).trim();
+}
+
+function normalizeCourseDate(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const date = new Date(text.replace(/[.年月]/g, '-').replace(/[日]/g, ''));
+    if (!Number.isNaN(date.getTime())) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    return text;
+}
+
+function isYellowFill(cell) {
+    const fill = cell && cell.fill ? cell.fill : {};
+    const fg = fill.fgColor || {};
+    const argb = String(fg.argb || '').toUpperCase();
+    return argb === 'FFFFFF00' || argb === 'FFFFF3CA' || argb.startsWith('FFFFF');
+}
+
+function parseCourseHeaderDate(header) {
+    const text = String(header || '').trim();
+    const m = text.match(/(\d{4})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
+    if (!m) return '';
+    return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+}
+
+function parseActivityFromHeader(header) {
+    const m = String(header || '').match(/[（(]([^）)]+)[）)]/);
+    return m ? m[1].trim() : '社团';
+}
+
+function getRosterActivities(person) {
+    const activities = [];
+    if (person.club) {
+        activities.push({ activityType: '社团', courseName: person.club });
+    }
+    [person.second1, person.second2].filter(Boolean).forEach(courseName => {
+        activities.push({ activityType: '第二课堂', courseName });
+    });
+    return activities;
+}
+
+app.post('/api/course-hours/import', requireAuth, requireCourseManager, upload.single('file'), async (req, res) => {
+    if (!req.file) return res.json({ success: false, message: '请上传Excel文件' });
+    try {
+        const ExcelJS = require('exceljs');
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.readFile(req.file.path);
+        const ws = wb.worksheets[0];
+        if (!ws) {
+            fs.unlinkSync(req.file.path);
+            return res.json({ success: false, message: 'Excel文件格式错误：找不到工作表' });
+        }
+
+        const headers = [];
+        ws.getRow(1).eachCell({ includeEmpty: true }, cell => headers.push(normalizeCourseHeader(cell.value)));
+        const cols = {
+            teacherId: findCourseColumn(headers, ['教师账号', '教师工号', '工号', '账号', 'teacher_id', 'employee_id']),
+            teacherName: findCourseColumn(headers, ['教师姓名', '教师', '姓名', 'teacher_name', 'name']),
+            subject: findCourseColumn(headers, ['课程', '科目', '学科', '课程名称', 'subject']),
+            className: findCourseColumn(headers, ['班级', '授课班级', 'class', 'class_name']),
+            courseDate: findCourseColumn(headers, ['日期', '上课日期', '授课日期', 'date', 'course_date']),
+            weekday: findCourseColumn(headers, ['星期', '周几', 'weekday']),
+            periodNo: findCourseColumn(headers, ['节次', '课节', '第几节', 'period', 'period_no']),
+            hours: findCourseColumn(headers, ['课时', '课时数', '小时', 'hours'])
+        };
+
+        if (!cols.teacherName && !cols.teacherId) {
+            fs.unlinkSync(req.file.path);
+            return res.json({ success: false, message: 'Excel表头至少需要“教师姓名”或“教师账号”' });
+        }
+
+        let imported = 0;
+        let skipped = 0;
+        const sourceFile = Buffer.from(req.file.originalname || '', 'latin1').toString('utf8');
+        const importedBy = req.session.user.employee_id || req.session.user.name || '';
+        await database.transaction(async () => {
+            for (let i = 2; i <= ws.rowCount; i++) {
+                const row = ws.getRow(i);
+                const teacherId = readCourseCell(row, cols.teacherId);
+                let teacherName = readCourseCell(row, cols.teacherName);
+                const subject = readCourseCell(row, cols.subject);
+                const className = readCourseCell(row, cols.className);
+                const courseDate = normalizeCourseDate(readCourseCell(row, cols.courseDate));
+                const weekday = readCourseCell(row, cols.weekday);
+                const periodNo = readCourseCell(row, cols.periodNo);
+                const hours = Number.parseFloat(readCourseCell(row, cols.hours)) || 1;
+                if (!teacherName && teacherId) {
+                    const user = await database.get('SELECT name FROM users WHERE employee_id = ? AND role = "teacher"', [teacherId]);
+                    teacherName = user ? user.name : '';
+                }
+                if (!teacherName || hours <= 0) {
+                    skipped++;
+                    continue;
+                }
+                await database.run(
+                    'INSERT INTO teacher_course_hours (teacher_employee_id, teacher_name, subject, class_name, course_date, weekday, period_no, hours, source_file, imported_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [teacherId, teacherName, subject, className, courseDate, weekday, periodNo, hours, sourceFile, importedBy]
+                );
+                imported++;
+            }
+        });
+        fs.unlinkSync(req.file.path);
+        res.json({ success: true, message: `导入完成：成功${imported}条，跳过${skipped}条`, imported, skipped });
+    } catch (err) {
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            try { fs.unlinkSync(req.file.path); } catch(e) {}
+        }
+        res.json({ success: false, message: err.message || '导入失败' });
+    }
+});
+
+app.get('/api/course-hours/stats', requireAuth, requireCourseManager, async (req, res) => {
+    const { start_date, end_date, teacher, subject } = req.query;
+    const where = [];
+    const params = [];
+    if (start_date) { where.push('course_date >= ?'); params.push(start_date); }
+    if (end_date) { where.push('course_date <= ?'); params.push(end_date); }
+    if (teacher) { where.push('(teacher_employee_id LIKE ? OR teacher_name LIKE ?)'); params.push(`%${teacher}%`, `%${teacher}%`); }
+    if (subject) { where.push('subject LIKE ?'); params.push(`%${subject}%`); }
+    const whereSql = where.length ? ' WHERE ' + where.join(' AND ') : '';
+    const totals = await database.get(`SELECT COUNT(*) AS record_count, COALESCE(SUM(hours), 0) AS total_hours, COUNT(DISTINCT teacher_name) AS teacher_count FROM teacher_course_hours${whereSql}`, params);
+    const byTeacher = await database.all(`SELECT teacher_employee_id, teacher_name, COALESCE(SUM(hours), 0) AS total_hours, COUNT(*) AS lesson_count FROM teacher_course_hours${whereSql} GROUP BY teacher_employee_id, teacher_name ORDER BY total_hours DESC, teacher_name ASC`, params);
+    const bySubject = await database.all(`SELECT subject, COALESCE(SUM(hours), 0) AS total_hours, COUNT(*) AS lesson_count FROM teacher_course_hours${whereSql} GROUP BY subject ORDER BY total_hours DESC, subject ASC`, params);
+    const records = await database.all(`SELECT id, teacher_employee_id, teacher_name, subject, class_name, course_date, weekday, period_no, hours FROM teacher_course_hours${whereSql} ORDER BY course_date DESC, id DESC LIMIT 300`, params);
+    res.json({ success: true, data: { totals: totals || {}, byTeacher, bySubject, records } });
+});
+
+app.delete('/api/course-hours/:id', requireAuth, requireCourseManager, async (req, res) => {
+    await database.run('DELETE FROM teacher_course_hours WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: '删除成功' });
+});
+
+app.post('/api/course-hours/clear', requireAuth, requireCourseManager, async (req, res) => {
+    await database.run('DELETE FROM teacher_course_hours');
+    res.json({ success: true, message: '已清空教师课时数据' });
+});
+
+app.post('/api/substitute-teachers/import', requireAuth, requireCourseManager, upload.single('file'), async (req, res) => {
+    if (!req.file) return res.json({ success: false, message: '请上传Excel文件' });
+    try {
+        const ExcelJS = require('exceljs');
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.readFile(req.file.path);
+        const ws = wb.worksheets[0];
+        if (!ws) {
+            fs.unlinkSync(req.file.path);
+            return res.json({ success: false, message: 'Excel文件格式错误：找不到工作表' });
+        }
+
+        let imported = 0;
+        let available = 0;
+        let importedRequests = 0;
+        const sourceFile = Buffer.from(req.file.originalname || '', 'latin1').toString('utf8');
+        const roster = [];
+        await database.transaction(async () => {
+            await database.run('DELETE FROM substitute_teachers');
+            await database.run('DELETE FROM club_activity_sessions WHERE source_file = ?', [sourceFile]);
+            for (let i = 2; i <= ws.rowCount; i++) {
+                const row = ws.getRow(i);
+                const name = readCourseCell(row, 2);
+                if (!name) continue;
+                const club = readCourseCell(row, 3);
+                const second1 = readCourseCell(row, 4);
+                const second2 = readCourseCell(row, 5);
+                const canSubstitute = isYellowFill(row.getCell(2)) ? 0 : 1;
+                const assignments = [];
+                for (let c = 3; c <= ws.columnCount; c++) {
+                    const value = readCourseCell(row, c);
+                    if (value) assignments.push(value);
+                }
+                await database.run(
+                    'INSERT INTO substitute_teachers (teacher_name, can_substitute, current_assignments, source_file) VALUES (?, ?, ?, ?)',
+                    [name, canSubstitute, assignments.join('；'), sourceFile]
+                );
+                roster.push({ name, club, second1, second2, row });
+                imported++;
+                if (canSubstitute) available++;
+            }
+
+            const byName = new Map(roster.map(item => [item.name, item]));
+            for (let c = 6; c <= ws.columnCount; c++) {
+                const header = readCourseCell(ws.getRow(1), c);
+                const courseDate = parseCourseHeaderDate(header);
+                if (!courseDate) continue;
+                const headerActivity = parseActivityFromHeader(header);
+                const substituteByOriginal = new Map();
+                for (const person of roster) {
+                    const marker = readCourseCell(person.row, c);
+                    const match = marker.match(/^代(.+)$/);
+                    if (match) {
+                        substituteByOriginal.set(match[1].replace(/[\s　]+/g, '').trim(), person.name);
+                    }
+                }
+
+                for (const person of roster) {
+                    for (const { activityType, courseName } of getRosterActivities(person)) {
+                        const substituteTeacher = substituteByOriginal.get(person.name) || '';
+                        const existingSession = await database.get(
+                            'SELECT id FROM club_activity_sessions WHERE course_date = ? AND course_name = ? AND scheduled_teacher = ?',
+                            [courseDate, courseName, person.name]
+                        );
+                        if (existingSession) {
+                            await database.run(
+                                'UPDATE club_activity_sessions SET activity_type = ?, substitute_teacher = ?, source_file = ? WHERE id = ?',
+                                [activityType, substituteTeacher, sourceFile, existingSession.id]
+                            );
+                        } else {
+                            await database.run(
+                                'INSERT INTO club_activity_sessions (activity_type, course_name, course_date, scheduled_teacher, substitute_teacher, source_file) VALUES (?, ?, ?, ?, ?, ?)',
+                                [activityType, courseName, courseDate, person.name, substituteTeacher, sourceFile]
+                            );
+                        }
+                    }
+                }
+
+                for (const person of roster) {
+                    const marker = readCourseCell(person.row, c);
+                    const match = marker.match(/^代(.+)$/);
+                    if (!match) continue;
+                    const originalName = match[1].replace(/[\s　]+/g, '').trim();
+                    const original = byName.get(originalName);
+                    const reason = original ? readCourseCell(original.row, c) : '';
+                    const originalActivities = original ? getRosterActivities(original) : [];
+                    const preferredActivities = headerActivity
+                        ? originalActivities.filter(item => item.activityType === headerActivity)
+                        : originalActivities;
+                    const selectedActivities = preferredActivities.length ? preferredActivities : originalActivities;
+                    const activityType = selectedActivities[0] ? selectedActivities[0].activityType : (headerActivity || '社团');
+                    const courseName = selectedActivities.map(item => item.courseName).filter(Boolean).join('；');
+                    const notes = `来源：${sourceFile}；${header}`;
+                    const existing = await database.get(
+                        'SELECT id FROM substitute_requests WHERE course_date = ? AND original_teacher = ? AND substitute_teacher = ? AND course_name = ?',
+                        [courseDate, originalName, person.name, courseName]
+                    );
+                    if (existing) {
+                        await database.run('UPDATE substitute_requests SET activity_type = ?, reason = ?, notes = ? WHERE id = ?', [activityType, reason, notes, existing.id]);
+                    } else {
+                        await database.run(
+                            'INSERT INTO substitute_requests (activity_type, course_name, course_date, original_teacher, substitute_teacher, reason, notes, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                            [activityType, courseName, courseDate, originalName, person.name, reason, notes, req.session.user.name || req.session.user.employee_id || '']
+                        );
+                    }
+                    importedRequests++;
+                }
+            }
+        });
+        fs.unlinkSync(req.file.path);
+        res.json({ success: true, message: `导入完成：共${imported}名老师，可代课${available}名，不可代课${imported - available}名，代课记录${importedRequests}条`, imported, available, importedRequests });
+    } catch (err) {
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            try { fs.unlinkSync(req.file.path); } catch(e) {}
+        }
+        res.json({ success: false, message: err.message || '导入失败' });
+    }
+});
+
+app.get('/api/substitute-teachers', requireAuth, requireCourseManager, async (req, res) => {
+    const rows = await database.all('SELECT id, teacher_name, can_substitute, current_assignments FROM substitute_teachers ORDER BY can_substitute DESC, teacher_name ASC');
+    res.json({ success: true, data: rows, available: rows.filter(r => Number(r.can_substitute) === 1) });
+});
+
+app.post('/api/substitute-requests', requireAuth, requireCourseManager, async (req, res) => {
+    const { activity_type, course_name, course_date, original_teacher, substitute_teacher, reason, notes } = req.body || {};
+    if (!original_teacher || !substitute_teacher) return res.json({ success: false, message: '请填写请假老师和代课老师' });
+    const sub = await database.get('SELECT can_substitute FROM substitute_teachers WHERE teacher_name = ?', [substitute_teacher]);
+    if (!sub || Number(sub.can_substitute) !== 1) return res.json({ success: false, message: '该老师不可代课或不在可选名单中' });
+    await database.run(
+        'INSERT INTO substitute_requests (activity_type, course_name, course_date, original_teacher, substitute_teacher, reason, notes, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [activity_type || '社团', course_name || '', course_date || '', original_teacher, substitute_teacher, reason || '', notes || '', req.session.user.name || req.session.user.employee_id || '']
+    );
+    res.json({ success: true, message: '代课申请已记录' });
+});
+
+function buildSubstituteWhere(query) {
+    const { start_date, end_date, teacher, course_name } = query;
+    const where = [];
+    const params = [];
+    if (start_date) { where.push('course_date >= ?'); params.push(start_date); }
+    if (end_date) { where.push('course_date <= ?'); params.push(end_date); }
+    if (teacher) { where.push('(original_teacher LIKE ? OR substitute_teacher LIKE ?)'); params.push(`%${teacher}%`, `%${teacher}%`); }
+    if (course_name) { where.push('course_name LIKE ?'); params.push(`%${course_name}%`); }
+    return { whereSql: where.length ? ' WHERE ' + where.join(' AND ') : '', params };
+}
+
+function buildActivityWhere(query) {
+    const { start_date, end_date, teacher, course_name } = query;
+    const where = [];
+    const params = [];
+    if (start_date) { where.push('course_date >= ?'); params.push(start_date); }
+    if (end_date) { where.push('course_date <= ?'); params.push(end_date); }
+    if (teacher) { where.push('(scheduled_teacher LIKE ? OR substitute_teacher LIKE ?)'); params.push(`%${teacher}%`, `%${teacher}%`); }
+    if (course_name) { where.push('course_name LIKE ?'); params.push(`%${course_name}%`); }
+    return { whereSql: where.length ? ' WHERE ' + where.join(' AND ') : '', params };
+}
+
+app.get('/api/substitute-requests', requireAuth, requireCourseManager, async (req, res) => {
+    const { whereSql, params } = buildSubstituteWhere(req.query);
+    const records = await database.all(`SELECT * FROM substitute_requests${whereSql} ORDER BY course_date DESC, id DESC`, params);
+    const byCourse = await database.all(`SELECT course_name, COUNT(*) AS substitute_count FROM substitute_requests${whereSql} GROUP BY course_name ORDER BY substitute_count DESC, course_name ASC`, params);
+    const byTeacher = await database.all(`SELECT substitute_teacher, COUNT(*) AS substitute_count FROM substitute_requests${whereSql} GROUP BY substitute_teacher ORDER BY substitute_count DESC, substitute_teacher ASC`, params);
+    res.json({ success: true, data: { records, byCourse, byTeacher } });
+});
+
+app.get('/api/substitute-dashboard', requireAuth, requireCourseManager, async (req, res) => {
+    const { whereSql, params } = buildSubstituteWhere(req.query);
+    const { whereSql: activityWhereSql, params: activityParams } = buildActivityWhere(req.query);
+    const records = await database.all(`SELECT id, activity_type, course_name, course_date, original_teacher, substitute_teacher, reason, notes FROM substitute_requests${whereSql} ORDER BY course_date DESC, id DESC`, params);
+    const teacherStats = await database.all(`SELECT substitute_teacher, COUNT(*) AS substitute_count, GROUP_CONCAT(CONCAT(COALESCE(course_date, ''), ' ', COALESCE(course_name, ''), '（代', COALESCE(original_teacher, ''), '）') ORDER BY course_date DESC SEPARATOR '；') AS details FROM substitute_requests${whereSql} GROUP BY substitute_teacher ORDER BY substitute_count DESC, substitute_teacher ASC`, params);
+    const originalTeacherStats = await database.all(`SELECT original_teacher, COUNT(*) AS leave_count FROM substitute_requests${whereSql} GROUP BY original_teacher ORDER BY leave_count DESC, original_teacher ASC`, params);
+    const courseStats = await database.all(`SELECT course_name, activity_type, COUNT(*) AS session_count, COUNT(DISTINCT course_date) AS date_count, MIN(course_date) AS first_date, MAX(course_date) AS last_date FROM club_activity_sessions${activityWhereSql} GROUP BY course_name, activity_type ORDER BY session_count DESC, course_name ASC`, activityParams);
+    const dateStats = await database.all(`SELECT course_date, COUNT(*) AS session_count, COUNT(DISTINCT course_name) AS course_count FROM club_activity_sessions${activityWhereSql} GROUP BY course_date ORDER BY course_date DESC`, activityParams);
+    const activityRecords = await database.all(`SELECT id, activity_type, course_name, course_date, scheduled_teacher, substitute_teacher, source_file FROM club_activity_sessions${activityWhereSql} ORDER BY course_date DESC, course_name ASC, scheduled_teacher ASC`, activityParams);
+    const teachers = await database.all('SELECT id, teacher_name, can_substitute, current_assignments FROM substitute_teachers ORDER BY can_substitute DESC, teacher_name ASC');
+    const teacherCountMap = new Map(teacherStats.map(row => [row.substitute_teacher, Number(row.substitute_count) || 0]));
+    const leaveCountMap = new Map(originalTeacherStats.map(row => [row.original_teacher, Number(row.leave_count) || 0]));
+    const teacherRoster = teachers.map(row => ({
+        ...row,
+        substitute_count: teacherCountMap.get(row.teacher_name) || 0,
+        leave_count: leaveCountMap.get(row.teacher_name) || 0
+    }));
+    const totals = {
+        available_teachers: teachers.filter(row => Number(row.can_substitute) === 1).length,
+        teacher_count: teachers.length,
+        substitute_count: records.length,
+        course_count: courseStats.filter(row => row.course_name).length,
+        date_count: dateStats.length,
+        activity_count: activityRecords.length
+    };
+    res.json({ success: true, data: { totals, records, teacherStats, courseStats, dateStats, activityRecords, teacherRoster } });
+});
+
+function styleWorksheetHeader(sheet) {
+    const header = sheet.getRow(1);
+    header.font = { bold: true, color: { argb: 'FF111827' } };
+    header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF1F5' } };
+    header.alignment = { vertical: 'middle' };
+    header.height = 24;
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: sheet.columnCount }
+    };
+}
+
+function addSheet(workbook, name, columns, rows) {
+    const sheet = workbook.addWorksheet(name);
+    sheet.columns = columns;
+    rows.forEach(row => sheet.addRow(row));
+    styleWorksheetHeader(sheet);
+    sheet.eachRow(row => {
+        row.eachCell(cell => {
+            cell.alignment = { vertical: 'middle', wrapText: true };
+            cell.border = { bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } } };
+        });
+    });
+    return sheet;
+}
+
+app.get('/api/substitute-dashboard/export', requireAuth, requireCourseManager, async (req, res) => {
+    const ExcelJS = require('exceljs');
+    const { whereSql, params } = buildSubstituteWhere(req.query);
+    const { whereSql: activityWhereSql, params: activityParams } = buildActivityWhere(req.query);
+
+    const records = await database.all(`SELECT activity_type, course_name, course_date, original_teacher, substitute_teacher, reason, notes FROM substitute_requests${whereSql} ORDER BY course_date DESC, id DESC`, params);
+    const teacherStats = await database.all(`SELECT substitute_teacher, COUNT(*) AS substitute_count, GROUP_CONCAT(CONCAT(COALESCE(course_date, ''), ' ', COALESCE(course_name, ''), '（代', COALESCE(original_teacher, ''), '）') ORDER BY course_date DESC SEPARATOR '；') AS details FROM substitute_requests${whereSql} GROUP BY substitute_teacher ORDER BY substitute_count DESC, substitute_teacher ASC`, params);
+    const originalTeacherStats = await database.all(`SELECT original_teacher, COUNT(*) AS leave_count FROM substitute_requests${whereSql} GROUP BY original_teacher ORDER BY leave_count DESC, original_teacher ASC`, params);
+    const courseStats = await database.all(`SELECT course_name, activity_type, COUNT(*) AS session_count, COUNT(DISTINCT course_date) AS date_count, MIN(course_date) AS first_date, MAX(course_date) AS last_date FROM club_activity_sessions${activityWhereSql} GROUP BY course_name, activity_type ORDER BY session_count DESC, course_name ASC`, activityParams);
+    const activityRecords = await database.all(`SELECT activity_type, course_name, course_date, scheduled_teacher, substitute_teacher, source_file FROM club_activity_sessions${activityWhereSql} ORDER BY course_date DESC, course_name ASC, scheduled_teacher ASC`, activityParams);
+    const teachers = await database.all('SELECT teacher_name, can_substitute, current_assignments FROM substitute_teachers ORDER BY can_substitute DESC, teacher_name ASC');
+    const teacherCountMap = new Map(teacherStats.map(row => [row.substitute_teacher, Number(row.substitute_count) || 0]));
+    const leaveCountMap = new Map(originalTeacherStats.map(row => [row.original_teacher, Number(row.leave_count) || 0]));
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = '学生管理系统';
+    workbook.created = new Date();
+
+    addSheet(workbook, '代课明细', [
+        { header: '日期', key: 'course_date', width: 14 },
+        { header: '类型', key: 'activity_type', width: 12 },
+        { header: '社团/课程', key: 'course_name', width: 28 },
+        { header: '请假老师', key: 'original_teacher', width: 14 },
+        { header: '代课老师', key: 'substitute_teacher', width: 14 },
+        { header: '原因', key: 'reason', width: 22 },
+        { header: '备注', key: 'notes', width: 30 }
+    ], records);
+
+    addSheet(workbook, '代课老师统计', [
+        { header: '代课老师', key: 'substitute_teacher', width: 16 },
+        { header: '代课次数', key: 'substitute_count', width: 12 },
+        { header: '代课明细', key: 'details', width: 70 }
+    ], teacherStats);
+
+    addSheet(workbook, '社团开展统计', [
+        { header: '社团/课程', key: 'course_name', width: 30 },
+        { header: '类型', key: 'activity_type', width: 12 },
+        { header: '开展次数', key: 'session_count', width: 12 },
+        { header: '开展日期数', key: 'date_count', width: 12 },
+        { header: '首次日期', key: 'first_date', width: 14 },
+        { header: '最近日期', key: 'last_date', width: 14 }
+    ], courseStats);
+
+    addSheet(workbook, '开展明细', [
+        { header: '日期', key: 'course_date', width: 14 },
+        { header: '类型', key: 'activity_type', width: 12 },
+        { header: '社团/课程', key: 'course_name', width: 30 },
+        { header: '排课老师', key: 'scheduled_teacher', width: 14 },
+        { header: '实际代课老师', key: 'substitute_teacher', width: 16 },
+        { header: '来源文件', key: 'source_file', width: 34 }
+    ], activityRecords);
+
+    addSheet(workbook, '老师名单', [
+        { header: '老师', key: 'teacher_name', width: 16 },
+        { header: '是否可代课', key: 'can_substitute_text', width: 14 },
+        { header: '当前安排', key: 'current_assignments', width: 42 },
+        { header: '代课次数', key: 'substitute_count', width: 12 },
+        { header: '请假次数', key: 'leave_count', width: 12 }
+    ], teachers.map(row => ({
+        ...row,
+        can_substitute_text: Number(row.can_substitute) === 1 ? '可代课' : '不可代课',
+        substitute_count: teacherCountMap.get(row.teacher_name) || 0,
+        leave_count: leaveCountMap.get(row.teacher_name) || 0
+    })));
+
+    const filename = `社团代课总表_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.send(Buffer.from(buffer));
+});
+
+app.delete('/api/substitute-requests/:id', requireAuth, requireCourseManager, async (req, res) => {
+    await database.run('DELETE FROM substitute_requests WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: '删除成功' });
+});
+
+// 清空全部社团/代课数据
+app.delete('/api/club-data/clear-all', requireAuth, requireCourseManager, async (req, res) => {
+    await database.run('DELETE FROM substitute_requests');
+    await database.run('DELETE FROM club_activity_sessions');
+    await database.run('DELETE FROM substitute_teachers');
+    await database.run('DELETE FROM teacher_course_hours');
+    logEvent('清空社团代课数据', req, '已清空教师名单、代课记录、活动记录、课时数据');
+    res.json({ success: true, message: '已清空全部教师名单、代课记录、活动记录和课时数据' });
 });
 
 // ============ 班级管理 ============

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>课程管理 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="course-hours-page">
+<div class="main-layout">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            <span>成绩分析</span>
+        </div>
+        <nav class="nav-menu">
+            <div class="nav-group">
+                <div class="nav-parent" onclick="toggleSubMenu(this)">
+                    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+                    课程管理
+                    <svg class="arrow" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                </div>
+                <ul class="nav-sub" id="courseSubMenu">
+                    <li><a class="nav-item active" data-panel="schedule" onclick="switchPanel('schedule', this)">课程表统计</a></li>
+                    <li><a class="nav-item" data-panel="club" onclick="switchPanel('club', this)">社团统计</a></li>
+                </ul>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="user-info" style="cursor:pointer;" onclick="openPasswordModal()">
+                <div class="user-avatar" id="userAvatar">课</div>
+                <div class="user-details">
+                    <div class="user-name" id="userName">课程管理员</div>
+                    <div class="user-role" id="userRoleText">课程管理员</div>
+                </div>
+            </div>
+            <button type="button" class="logout-btn" onclick="logout()" style="margin-top:15px;width:100%;">退出登录</button>
+        </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+        <header class="page-header">
+            <div class="header-left">
+                <h1 class="page-title" id="panelTitle">课程表统计</h1>
+            </div>
+        </header>
+
+        <div class="page-content">
+            <!-- ========== 面板1: 课程表统计 ========== -->
+            <div class="course-module-view active" id="panel-schedule">
+                <!-- 统计卡片 -->
+                <div class="card-grid course-hour-summary" id="scheduleSummary">
+                    <div class="stat-card"><div class="stat-card-header"><div class="stat-card-icon blue"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg></div></div><div class="stat-card-value" id="scheduleRecordCount">0</div><div class="stat-card-label">总记录数</div></div>
+                    <div class="stat-card"><div class="stat-card-header"><div class="stat-card-icon green"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg></div></div><div class="stat-card-value" id="scheduleTotalHours">0</div><div class="stat-card-label">总课时数</div></div>
+                    <div class="stat-card"><div class="stat-card-header"><div class="stat-card-icon purple"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></div></div><div class="stat-card-value" id="scheduleTeacherCount">0</div><div class="stat-card-label">教师数量</div></div>
+                </div>
+
+                <!-- 筛选栏 -->
+                <div class="table-container course-hour-panel">
+                    <div class="table-header">
+                        <h3 class="table-title">课时明细</h3>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button class="btn btn-secondary btn-sm" onclick="handleScheduleImport()">导入Excel</button>
+                            <button class="btn btn-primary btn-sm" onclick="exportSchedule()">导出Excel</button>
+                        </div>
+                    </div>
+                    <div class="course-hour-filters">
+                        <input type="date" id="schStartDate" placeholder="开始日期" onchange="loadScheduleStats()">
+                        <input type="date" id="schEndDate" placeholder="结束日期" onchange="loadScheduleStats()">
+                        <input type="text" id="schTeacher" placeholder="教师姓名/账号" oninput="loadScheduleStats()">
+                        <input type="text" id="schSubject" placeholder="课程/学科" oninput="loadScheduleStats()">
+                        <button class="btn btn-sm" style="background:#e5e7eb;color:#6b7280;" onclick="clearScheduleFilters()">清除筛选</button>
+                    </div>
+                    <div class="course-table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>教师账号</th>
+                                    <th>教师姓名</th>
+                                    <th>课程/学科</th>
+                                    <th>班级</th>
+                                    <th>星期</th>
+                                    <th>节次</th>
+                                    <th>课时数</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scheduleTableBody">
+                                <tr><td colspan="9" class="empty-cell">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== 面板2: 社团统计 ========== -->
+            <div class="course-module-view" id="panel-club">
+                <!-- 统计卡片 -->
+                <div class="card-grid course-hour-summary" id="clubSummary">
+                    <div class="stat-card"><div class="stat-card-header"><div class="stat-card-icon green"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></div></div><div class="stat-card-value" id="clubSubstituteCount">0</div><div class="stat-card-label">代课总次数</div></div>
+                    <div class="stat-card"><div class="stat-card-header"><div class="stat-card-icon blue"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></div></div><div class="stat-card-value" id="clubTeacherCount">0</div><div class="stat-card-label">教师总数</div></div>
+                    <div class="stat-card"><div class="stat-card-header"><div class="stat-card-icon purple"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg></div></div><div class="stat-card-value" id="clubCourseCount">0</div><div class="stat-card-label">社团/课程数</div></div>
+                    <div class="stat-card"><div class="stat-card-header"><div class="stat-card-icon orange"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm-2 14l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg></div></div><div class="stat-card-value" id="clubActivityCount">0</div><div class="stat-card-label">活动开展次数</div></div>
+                </div>
+
+                <!-- 筛选栏 -->
+                <div class="table-container course-hour-panel">
+                    <div class="table-header">
+                        <h3 class="table-title">代课明细</h3>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button class="btn btn-secondary btn-sm" onclick="handleClubImport()">导入Excel</button>
+                            <button class="btn btn-primary btn-sm" onclick="exportClub()">导出Excel</button>
+                            <button class="btn btn-sm" style="background:#FEE2E2;color:#EF4444;" onclick="clearAllClubData()">清理数据</button>
+                        </div>
+                    </div>
+                    <div class="course-hour-filters">
+                        <input type="date" id="clubStartDate" placeholder="开始日期" onchange="loadClubStats()">
+                        <input type="date" id="clubEndDate" placeholder="结束日期" onchange="loadClubStats()">
+                        <input type="text" id="clubTeacher" placeholder="老师姓名" oninput="loadClubStats()">
+                        <input type="text" id="clubCourse" placeholder="社团/课程名" oninput="loadClubStats()">
+                        <button class="btn btn-sm" style="background:#e5e7eb;color:#6b7280;" onclick="clearClubFilters()">清除筛选</button>
+                        <button class="btn btn-sm btn-primary" onclick="openAddSubModal()" style="margin-left:auto;">+ 添加代课</button>
+                    </div>
+                    <div class="course-table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>类型</th>
+                                    <th>社团/课程</th>
+                                    <th>请假老师</th>
+                                    <th>代课老师</th>
+                                    <th>原因</th>
+                                    <th>备注</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="clubRecordsTable">
+                                <tr><td colspan="8" class="empty-cell">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 教师代课统计 -->
+                <div class="course-hour-grid substitute-insight-grid" style="margin-top:20px;">
+                    <div class="table-container course-hour-panel">
+                        <div class="course-hour-title" style="font-weight:600;">教师代课统计</div>
+                        <div class="course-table-scroll">
+                            <table>
+                                <colgroup>
+                                    <col style="width:90px;">
+                                    <col style="width:72px;">
+                                    <col style="width:auto;">
+                                </colgroup>
+                                <thead>
+                                    <tr><th>代课老师</th><th>代课次数</th><th>代课明细</th></tr>
+                                </thead>
+                                <tbody id="clubTeacherStatsTable">
+                                    <tr><td colspan="3" class="empty-cell">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="table-container course-hour-panel">
+                        <div class="course-hour-title" style="font-weight:600;">社团开展统计</div>
+                        <div class="course-table-scroll">
+                            <table>
+                                <colgroup>
+                                    <col style="width:auto;">
+                                    <col style="width:72px;">
+                                    <col style="width:80px;">
+                                    <col style="width:100px;">
+                                    <col style="width:100px;">
+                                </colgroup>
+                                <thead>
+                                    <tr><th>社团/课程</th><th>类型</th><th>开展次数</th><th>首次日期</th><th>最近日期</th></tr>
+                                </thead>
+                                <tbody id="clubCourseStatsTable">
+                                    <tr><td colspan="5" class="empty-cell">加载中...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 活动开展明细 -->
+                <div class="table-container course-hour-panel substitute-panel">
+                    <div class="course-hour-title" style="font-weight:600;">活动开展明细</div>
+                    <div class="course-table-scroll">
+                        <table class="substitute-master-table">
+                            <thead>
+                                <tr>
+                                    <th>日期</th><th>类型</th><th>社团/课程</th>
+                                    <th>排课老师</th><th>实际代课老师</th>
+                                </tr>
+                            </thead>
+                            <tbody id="clubActivityRecordsTable">
+                                <tr><td colspan="5" class="empty-cell">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 教师名单 -->
+                <div class="table-container course-hour-panel substitute-panel">
+                    <div class="course-hour-title" style="font-weight:600;">
+                        教师名单
+                        <span style="font-weight:400;font-size:0.82rem;color:#6b7280;margin-left:12px;">
+                            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#DCFCE7;margin-right:4px;"></span>可代课
+                            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#FEE2E2;margin-left:8px;margin-right:4px;"></span>不可代课（黄色底色）
+                        </span>
+                    </div>
+                    <div class="course-table-scroll">
+                        <table class="substitute-master-table">
+                            <thead>
+                                <tr><th>老师</th><th>代课状态</th><th>当前安排</th><th>代课次数</th><th>请假次数</th></tr>
+                            </thead>
+                            <tbody id="clubTeacherRosterTable">
+                                <tr><td colspan="5" class="empty-cell">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Toast 提示 -->
+<div class="toast-container"><div class="toast" id="toast"></div></div>
+
+<!-- 导入Excel模态框 - 课程表统计 -->
+<div class="modal-overlay" id="scheduleImportModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 class="modal-title">导入课时统计</h2>
+            <button class="modal-close" onclick="closeModal('scheduleImportModal')">
+                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+        </div>
+        <div class="modal-form">
+            <div class="form-group">
+                <label>上传Excel文件</label>
+                <div class="file-upload-area" id="scheduleFileUploadArea">
+                    <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                    <p>点击选择文件或将文件拖拽到此处</p>
+                    <small>表头需包含：教师账号/教师姓名、课程/学科、班级、日期、节次、课时数</small>
+                    <input type="file" id="scheduleFileInput" accept=".xlsx,.xls" style="display:none;" onchange="handleScheduleFileSelect(event)">
+                </div>
+                <div id="scheduleFileName" style="margin-top:10px;color:var(--primary-color);font-weight:500;"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('scheduleImportModal')">取消</button>
+                <button type="button" class="btn btn-primary" id="scheduleImportBtn" onclick="doScheduleImport()" disabled>导入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 导入Excel模态框 - 社团统计 -->
+<div class="modal-overlay" id="clubImportModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 class="modal-title">导入社团与代课排班表</h2>
+            <button class="modal-close" onclick="closeModal('clubImportModal')">
+                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+        </div>
+        <div class="modal-form">
+            <div class="form-group">
+                <label>上传Excel文件（含黄色底色标记的代课排班表）</label>
+                <div class="file-upload-area" id="clubFileUploadArea">
+                    <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                    <p>点击选择文件或将文件拖拽到此处</p>
+                    <small>黄色底色标记 = 不可代课教师。表头列需包含日期、社团/课程名、代课标记</small>
+                    <input type="file" id="clubFileInput" accept=".xlsx,.xls" style="display:none;" onchange="handleClubFileSelect(event)">
+                </div>
+                <div id="clubFileName" style="margin-top:10px;color:var(--primary-color);font-weight:500;"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('clubImportModal')">取消</button>
+                <button type="button" class="btn btn-primary" id="clubImportBtn" onclick="doClubImport()" disabled>导入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 添加代课模态框 -->
+<div class="modal-overlay" id="addSubModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 class="modal-title">添加代课记录</h2>
+            <button class="modal-close" onclick="closeModal('addSubModal')">
+                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+        </div>
+        <form class="modal-form" onsubmit="return saveSubRequest(event)">
+            <div class="form-group"><label>类型</label><select id="subActivityType"><option>社团</option><option>第二课堂</option></select></div>
+            <div class="form-group"><label>社团/课程名称</label><select id="subCourseName" required><option value="">请选择社团/课程</option></select></div>
+            <div class="form-group"><label>日期</label><input type="date" id="subDate"></div>
+            <div class="form-group"><label>请假老师</label><select id="subOriginal" required><option value="">请选择老师</option></select></div>
+            <div class="form-group"><label>代课老师</label><select id="subTeacher" required><option value="">请选择代课老师</option></select></div>
+            <div class="form-group"><label>原因</label><input type="text" id="subReason"></div>
+            <div class="form-group"><label>备注</label><input type="text" id="subNotes"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addSubModal')">取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 修改密码弹窗 -->
+<div class="modal-overlay" id="passwordModal" style="display:none;">
+    <div class="modal" style="max-width:360px;">
+        <div class="modal-header">
+            <h2 class="modal-title">修改密码</h2>
+            <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+        </div>
+        <form class="modal-form" onsubmit="return doChangePassword(event)">
+            <div class="form-group"><label>旧密码</label><input type="password" id="oldPassword" required></div>
+            <div class="form-group"><label>新密码</label><input type="password" id="newPassword" required minlength="4"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('passwordModal')">取消</button>
+                <button type="submit" class="btn btn-primary">确认修改</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/js/course-hours.js"></script>
+</body>
+</html>
