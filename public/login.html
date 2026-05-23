@@ -928,6 +928,25 @@
             const kicked = params.get('kicked') === '1';
             const frozen = params.get('frozen') === '1';
             const timeout = params.get('timeout') === '1';
+            
+            // 检查是否已登录
+            fetch('/api/current-user')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        // 已登录，根据角色重定向
+                        const role = data.data.role;
+                        if (role === 'admin') {
+                            window.location.replace('/admin');
+                        } else if (role === 'class') {
+                            window.location.replace('/total-table');
+                        } else {
+                            window.location.replace('/dashboard');
+                        }
+                    }
+                })
+                .catch(() => {});
+
             if (!kicked && !frozen && !timeout) return;
 
             if (frozen) alert('账户异常，已被冻结。请与管理员联系。');
@@ -1273,17 +1292,17 @@
                 if (data.success) {
                     hideCaptcha();
                     if (data.redirect) {
-                        window.location.href = data.redirect;
+                        window.location.replace(data.redirect);
                     } else {
                         fetch('/api/auth/check')
                             .then(r => r.json())
                             .then(authData => {
                                 if (authData.user && authData.user.role === 'admin') {
-                                    window.location.href = '/admin';
+                                    window.location.replace('/admin');
                                 } else if (authData.user && authData.user.role === 'class') {
-                                    window.location.href = '/total-table';
+                                    window.location.replace('/total-table');
                                 } else {
-                                    window.location.href = '/dashboard';
+                                    window.location.replace('/dashboard');
                                 }
                             });
                     }
@@ -1572,5 +1591,6 @@
         })();
     </script>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/ai-chat.js"></script>
 </body>
 </html>

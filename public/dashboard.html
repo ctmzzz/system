@@ -362,6 +362,7 @@
             try{var r=await fetch('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_password:o,new_password:n})});var d=await r.json();if(d.success){closeModal('passwordModal');alert('密码修改成功');}else{e.textContent=d.message||'修改失败';e.style.display='block';}}catch(er){e.textContent='网络错误';e.style.display='block';}
         }
     </script>
+    <script src="/js/ai-chat.js"></script>
 
 </body>
 </html>

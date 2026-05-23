@@ -537,6 +537,7 @@
         function openPasswordModal(){document.getElementById("oldPassword").value="";document.getElementById("newPassword").value="";document.getElementById("confirmPassword").value="";document.getElementById("passwordError").style.display="none";document.getElementById("passwordModal").style.display="flex";}
         function closePasswordModal(id){document.getElementById(id).style.display="none";}
         async function changePassword(){var o=document.getElementById("oldPassword").value,n=document.getElementById("newPassword").value,c=document.getElementById("confirmPassword").value,e=document.getElementById("passwordError");if(!o||!n){e.textContent="请填写完整";e.style.display="block";return;}if(n.length<4){e.textContent="新密码至少4位";e.style.display="block";return;}if(n!==c){e.textContent="两次密码不一致";e.style.display="block";return;}try{var r=await fetch("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({old_password:o,new_password:n})});var d=await r.json();if(d.success){closePasswordModal("passwordModal");alert("密码修改成功");}else{e.textContent=d.message||"修改失败";e.style.display="block";}}catch(er){e.textContent="网络错误";e.style.display="block";}}</script>
+    <script src="/js/ai-chat.js"></script>
 
 </body>
 </html>

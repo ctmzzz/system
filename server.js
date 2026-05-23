@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { createWebSocketServer, getSessionCount, broadcastToClass, kickUserSessions, kickSocketsForSession, CLASS_MAX_SESSIONS, TEACHER_MAX_SESSIONS } = require('./ws-server');
 const workerPool = require('./worker-pool');
+const http = require('http');
 
 const INDICATOR_TREE = [
     { l0: '守礼明规', l1: '品德修养', l2: '政治态度', point: '参加党课学习班', score: '+10' },
@@ -462,6 +463,15 @@ app.get('/login', (req, res) => {
 app.get('/api/captcha/generate', (req, res) => {
     const captcha = generateCaptcha();
     res.json({ success: true, token: captcha.token, image: captcha.svg });
+});
+
+// 获取当前登录用户信息（不需要认证，未登录时返回 null）
+app.get('/api/current-user', (req, res) => {
+    if (req.session && req.session.user) {
+        res.json({ success: true, data: req.session.user });
+    } else {
+        res.json({ success: true, data: null });
+    }
 });
 
 // 登录API（带 WAF 防暴力破解 + 验证码 + 账户冻结）
@@ -3073,6 +3083,57 @@ app.get('/api/student/period-stats', requireAuth, async (req, res) => {
     } catch (err) {
         console.error('获取周期统计失败:', err);
         res.status(500).json({ success: false, message: '获取周期统计失败' });
+    }
+});
+
+// ===== Ollama AI 代理端点 =====
+app.post('/api/ollama/chat', async (req, res) => {
+    try {
+        const { model, messages, stream } = req.body;
+        const ollamaHost = '192.168.3.6';
+        const ollamaPort = 11434;
+        
+        // 设置响应头
+        res.setHeader('Content-Type', stream ? 'text/event-stream' : 'application/json');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        
+        // 向后端 Ollama 发送请求
+        const ollamaReq = http.request({
+            hostname: ollamaHost,
+            port: ollamaPort,
+            path: '/api/chat',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }, (ollamaRes) => {
+            // 流式转发响应
+            ollamaRes.on('data', (chunk) => {
+                res.write(chunk);
+            });
+            
+            ollamaRes.on('end', () => {
+                res.end();
+            });
+        });
+        
+        ollamaReq.on('error', (err) => {
+            console.error('Ollama 连接失败:', err);
+            res.status(500).json({ success: false, message: '无法连接到 Ollama 服务: ' + err.message });
+        });
+        
+        // 发送请求体
+        ollamaReq.write(JSON.stringify({
+            model: model || 'qwen2.5:1.5b',
+            messages: messages || [],
+            stream: stream !== false  // 默认开启流式
+        }));
+        ollamaReq.end();
+        
+    } catch (err) {
+        console.error('AI 代理错误:', err);
+        res.status(500).json({ success: false, message: 'AI 代理错误: ' + err.message });
     }
 });
 
