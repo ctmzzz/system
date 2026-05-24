@@ -53,12 +53,6 @@
         msgArea.id = 'aiChatMessages';
         msgArea.style.cssText = 'flex:1;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;background:#f9fafb;';
 
-        var sysMsg = document.createElement('div');
-        sysMsg.id = 'aiSystemHint';
-        sysMsg.style.cssText = 'align-self:center;background:#eef2ff;color:#6366f1;font-size:12px;padding:8px 16px;border-radius:12px;';
-        sysMsg.textContent = '打开对话框将自动分析当前页面数据';
-        msgArea.appendChild(sysMsg);
-
         var inputArea = document.createElement('div');
         inputArea.style.cssText = 'padding:14px 16px;border-top:1px solid #e5e7eb;display:flex;gap:12px;background:#fff;';
 
@@ -253,16 +247,36 @@
         if (container) container.scrollTop = container.scrollHeight;
     }
 
+    function createHint(text) {
+        var hintEl = document.createElement('div');
+        hintEl.id = 'aiSystemHint';
+        hintEl.style.cssText = 'align-self:center;background:#eef2ff;color:#6366f1;font-size:12px;padding:8px 16px;border-radius:12px;';
+        hintEl.textContent = text;
+        return hintEl;
+    }
+
     function updateHint(text) {
         var hintEl = document.getElementById('aiSystemHint');
-        if (hintEl) hintEl.textContent = text;
+        if (hintEl) {
+            hintEl.textContent = text;
+        }
+    }
+
+    function removeHint() {
+        var hintEl = document.getElementById('aiSystemHint');
+        if (hintEl) {
+            hintEl.remove();
+        }
     }
 
     async function doInitialAnalysis() {
         if (isAnalyzing || hasInitialAnalysis) return;
         isAnalyzing = true;
 
-        updateHint('正在获取数据...');
+        var msgArea = document.getElementById('aiChatMessages');
+        var initialHint = createHint('正在获取数据...');
+        msgArea.appendChild(initialHint);
+        
         console.log('[AI分析] 开始自动分析，当前页面:', currentPage);
 
         var botBubble = null;
@@ -342,14 +356,20 @@
                 messages.push({ role: 'assistant', content: botText });
             }
 
-            updateHint('以上为自动分析结果，您可继续提问');
+            // 将提示信息移到下面
+            removeHint();
+            var finalHint = createHint('以上为自动分析结果，您可继续提问');
+            msgArea.appendChild(finalHint);
 
         } catch (error) {
             console.error('[AI分析] 失败:', error.message || error);
             if (botBubble) {
                 botBubble.textContent = '分析失败，请检查AI服务是否正常运行。\n您也可以在下方手动输入问题。';
             }
-            updateHint('自动分析失败，您可手动输入问题');
+            // 将提示信息移到下面
+            removeHint();
+            var errorHint = createHint('自动分析失败，您可手动输入问题');
+            msgArea.appendChild(errorHint);
         }
 
         hasInitialAnalysis = true;
@@ -449,7 +469,7 @@
             messages.push({ role: 'assistant', content: botText });
 
         } catch (error) {
-            botBubble.textContent = '❌ 连接失败，请检查:\n1. Ollama 是否在 192.168.3.6:11434 运行\n2. 是否已拉取 qwen2.5:3b 模型';
+            botBubble.textContent = '❌ 网络连接失败，请稍后再试';
             console.error(error);
         }
 
@@ -466,17 +486,16 @@
             // 重置状态
             messages = [];
             hasInitialAnalysis = false;
-            // 清空聊天记录，保留系统提示
+            // 清空聊天记录
             var container = document.getElementById('aiChatMessages');
-            var systemHint = document.getElementById('aiSystemHint');
             container.innerHTML = '';
-            if (systemHint) container.appendChild(systemHint);
             
             // 在这些页面不自动生成分析：events, total-table, attendance, homework-data
             var noAutoAnalysisPages = ['/events', '/total-table', '/attendance', '/homework-data'];
             if (noAutoAnalysisPages.includes(currentPage)) {
                 // 不自动生成分析，显示提示
-                updateHint('有什么我可以帮助您的吗？');
+                var hint = createHint('有什么我可以帮助您的吗？');
+                container.appendChild(hint);
                 return;
             }
             
