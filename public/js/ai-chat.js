@@ -188,6 +188,7 @@
             // 事件页面
             if (typeof calYear !== 'undefined') selection.year = calYear;
             if (typeof calMonth !== 'undefined') selection.month = calMonth + 1;
+            if (typeof window.currentClassId !== 'undefined' && window.currentClassId) selection.class_id = window.currentClassId;
         } else if (path === '/total-table') {
             // 总表页面
             if (typeof currentClassId !== 'undefined') selection.class_id = currentClassId;
@@ -411,10 +412,26 @@
         isAnalyzing = false;
     }
 
+    var lastContextSelection = null;
+
     async function refreshContext() {
         try {
             var selection = getCurrentPageSelection();
             console.log('[AI分析] 获取最新选择:', selection);
+
+            var identityChanged = false;
+            if (lastContextSelection) {
+                if (currentPage === '/detail-analysis') {
+                    identityChanged = lastContextSelection.student_id !== selection.student_id;
+                }
+            }
+            lastContextSelection = {};
+            lastContextSelection.page = currentPage;
+            for (var key in selection) {
+                if (selection[key] !== null && selection[key] !== undefined) {
+                    lastContextSelection[key] = selection[key];
+                }
+            }
 
             var queryParams = new URLSearchParams();
             queryParams.append('page', currentPage);
@@ -429,8 +446,16 @@
 
             if (ctxData.success && ctxData.data && ctxData.data.context) {
                 var systemMessage = { role: 'system', content: ctxData.data.context };
-                // 替换或添加系统消息
-                if (messages.length > 0 && messages[0].role === 'system') {
+
+                if (identityChanged && messages.length > 0) {
+                    messages = [systemMessage];
+                    var msgArea = document.getElementById('aiChatMessages');
+                    if (msgArea) {
+                        msgArea.innerHTML = '';
+                        var hint = createHint('已切换到新学生，数据已刷新');
+                        msgArea.appendChild(hint);
+                    }
+                } else if (messages.length > 0 && messages[0].role === 'system') {
                     messages[0] = systemMessage;
                 } else {
                     messages.unshift(systemMessage);

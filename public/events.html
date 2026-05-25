@@ -405,13 +405,14 @@
             const data = await res.json();
             if (!data.loggedIn) { window.location.href = '/login'; return; }
             
+            window.currentUser = data.user;
+            window.currentClassId = data.user.class_id || '';
             document.getElementById('userAvatar').textContent = data.user.name.charAt(0);
             const roleMap = { admin: '系统管理员', teacher: '班主任', student: '学生', class: '班级' };
             document.getElementById('userName').textContent = data.user.name + ' ' + (roleMap[data.user.role] || '');
             localStorage.setItem('sidebarUserAvatar', data.user.name.charAt(0));
             localStorage.setItem('sidebarUserName', data.user.name + ' ' + (roleMap[data.user.role] || ''));
             if (data.user.role === 'class') {
-                // 班级账号不允许访问事件页面，重定向到总表
                 window.location.href = '/total-table';
                 return;
             }

@@ -624,8 +624,8 @@
 
     let currentStudents = [];
     let currentClassId = '';
-    let currentUser = null; // 保存当前用户信息
-    let dbScoreMap = {}; // 数据库中的分数快照，用于冲突检测
+    let currentUser = null;
+    let dbScoreMap = {};
 
     // ===== 初始化 =====
     async function checkAuth() {
@@ -634,6 +634,7 @@
         if (!data.loggedIn) { window.location.href = '/login'; return; }
         currentUser = data.user;
         window.currentUser = data.user;
+        window.currentClassId = String(data.user.class_id || '');
         
 
         

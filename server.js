@@ -3658,24 +3658,278 @@ app.get('/api/ai/context', requireAuth, async (req, res) => {
 });
 
 async function buildTeacherContext(user, page, selection) {
+    const classId = user.class_id || selection.class_id;
+    if (!classId) return buildDefaultTeacherContext(user);
+
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
+    if (!classInfo) return buildDefaultTeacherContext(user);
+
+    const pageLabel = pageToLabel(page);
     const lines = [];
-    lines.push('【当前用户信息】');
-    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+
+    lines.push(`【当前用户】${user.name}`);
+    lines.push(`【当前班级】${classInfo.name}`);
+    lines.push(`【当前页面】${pageLabel}`);
     lines.push('');
 
-    if (page === '/dashboard' || page === '/') {
-        return await buildDashboardContext(user, selection);
-    } else if (page === '/detail-analysis') {
-        return await buildDetailAnalysisContext(user, selection);
-    } else if (page === '/events') {
-        return await buildEventsContext(user, selection);
-    } else if (page === '/total-table') {
-        return await buildTotalTableContext(user, selection);
-    } else if (page === '/homework-data') {
-        return await buildHomeworkDataContext(user, selection);
-    } else {
-        return await buildDefaultTeacherContext(user);
+    const isDetailAnalysis = page === '/detail-analysis' && selection.student_id;
+    let studentName = '';
+    if (isDetailAnalysis) {
+        const student = await database.get('SELECT * FROM students WHERE id = ?', [selection.student_id]);
+        if (student) {
+            studentName = student.name;
+            lines.push(`=== 当前学生：${student.name} ===`);
+            lines.push(...(await buildStudentDetailLines(selection.student_id)));
+            lines.push('');
+        }
     }
+
+    lines.push('=== 班级美丽学分数据 ===');
+    lines.push(...(await buildCompactBeautyLines(classId, selection, pageLabel)));
+    lines.push('=== 班级考试成绩数据 ===');
+    lines.push(...(await buildCompactExamLines(classId)));
+
+    lines.push('');
+    lines.push('【智能路由规则】');
+    if (isDetailAnalysis) {
+        lines.push(`- 默认分析选定学生(${studentName})的个人成绩数据`);
+        lines.push('- 用户说"再次分析/重新分析/分析"→基于以上当前学生数据重新分析，忽略对话历史中的旧学生名');
+        lines.push('- 用户说"班级/全班/整体/美丽学分"→切换至班级数据');
+        lines.push('- 用户说"成绩/考试/排名/单科"→用学生成绩数据回答');
+        lines.push('【重要】如果对话历史中出现了不同于当前学生的姓名，请完全忽略，只分析以上显示的当前学生数据。');
+    } else {
+        lines.push(`- 默认分析【当前页面】(${pageLabel})的数据`);
+        lines.push('- 用户说"成绩/考试/排名/平均分/科目/总分"→用【考试成绩数据】回答');
+        lines.push('- 用户说"美丽学分/学分/积分/事件/扣分/加分"→用【美丽学分数据】回答');
+    }
+    lines.push('- 用户说"再次分析/重新分析"→请基于以上当前数据重新分析，不要沿用对话历史中的旧数据');
+    lines.push('- 用户说"作业/提交/缺交"→用作业数据回答');
+    lines.push('【回复要求】简洁精炼，只输出核心结论与可行建议，控制篇幅不啰嗦。');
+
+    return lines.join('\n');
+}
+
+function pageToLabel(page) {
+    const map = {
+        '/dashboard': '成绩分析', '/': '成绩分析',
+        '/detail-analysis': '详细汇总',
+        '/events': '美丽学分事件',
+        '/total-table': '美丽学分总表',
+        '/homework-data': '作业数据'
+    };
+    return map[page] || page || '首页';
+}
+
+async function buildCompactBeautyLines(classId, selection, pageLabel) {
+    const lines = [];
+    const students = await database.all(
+        'SELECT id, student_id, name FROM students WHERE class_id = ? ORDER BY student_id', [classId]
+    );
+    if (!students.length) { lines.push('暂无学生'); return lines; }
+
+    const studentMap = {};
+    students.forEach(s => { studentMap[s.student_id] = s; });
+
+    const allScoreByMonth = await database.all(
+        'SELECT month, student_id, SUM(score) as total, COUNT(*) as cnt FROM beauty_scores WHERE class_id=? GROUP BY month, student_id ORDER BY month, student_id',
+        [classId]
+    );
+
+    const allEventCounts = await database.all(
+        'SELECT month, COUNT(*) as cnt FROM beauty_score_events WHERE class_id=? GROUP BY month ORDER BY month',
+        [classId]
+    );
+
+    const monthSet = new Set();
+    allScoreByMonth.forEach(r => monthSet.add(r.month));
+    allEventCounts.forEach(r => monthSet.add(r.month));
+    const allMonths = Array.from(monthSet).sort();
+
+    if (!allMonths.length) { lines.push('暂无美丽学分数据'); return lines; }
+
+    const eventCountMap = {};
+    allEventCounts.forEach(r => { eventCountMap[r.month] = r.cnt; });
+
+    const monthSummary = {};
+    allMonths.forEach(m => {
+        monthSummary[m] = { label: m.substring(0, 7), total: 0, students: {} };
+    });
+    allScoreByMonth.forEach(r => {
+        const ms = monthSummary[r.month];
+        if (!ms) return;
+        const sc = parseFloat(r.total || 0);
+        ms.total += sc;
+        ms.students[r.student_id] = (ms.students[r.student_id] || 0) + sc;
+    });
+
+    lines.push('【各月总览】');
+    allMonths.forEach(m => {
+        const d = monthSummary[m];
+        const s = d.total >= 0 ? '+' : '';
+        const evtCnt = eventCountMap[m] || 0;
+        const top = Object.entries(d.students).sort((a, b) => b[1] - a[1]).slice(0, 2)
+            .map(([sid, sc]) => `${sid} ${sc >= 0 ? '+' : ''}${sc.toFixed(0)}`).join(', ');
+        const bottom = Object.entries(d.students).sort((a, b) => a[1] - b[1]).slice(0, 2)
+            .map(([sid, sc]) => `${sid} ${sc >= 0 ? '+' : ''}${sc.toFixed(0)}`).join(', ');
+        lines.push(`${d.label}: ${s}${d.total.toFixed(1)}分 ${evtCnt}事件 | 最高${top} | 最低${bottom}`);
+    });
+
+    if (allMonths.length >= 2) {
+        lines.push('【各学生月度趋势】');
+        students.map(s => s.student_id).sort().forEach(sid => {
+            const t = allMonths.map(m => {
+                const sc = monthSummary[m].students[sid] || 0;
+                return `${monthSummary[m].label}:${sc >= 0 ? '+' : ''}${sc.toFixed(0)}`;
+            }).join(' ');
+            const name = studentMap[sid] ? studentMap[sid].name : sid;
+            lines.push(`${name}(${sid}) ${t}`);
+        });
+    }
+    return lines;
+}
+
+async function buildCompactExamLines(classId) {
+    const lines = [];
+    const EXAM_ORDER = [
+        '高一上期中', '高一上期末', '高一下期中', '高一下期末',
+        '高二上期中', '高二上期末', '高二下期中', '高二下期末',
+        '高三上期中', '高三上期末', '高三下期中', '高三下期末'
+    ];
+
+    const exams = await database.all(`
+        SELECT DISTINCT e.id, e.name, e.date
+        FROM exams e WHERE EXISTS (
+            SELECT 1 FROM scores sc
+            JOIN students s ON sc.student_id = s.id
+            WHERE sc.exam_id = e.id AND s.class_id = ?
+              AND sc.total_score NOT IN ('缺考','免修')
+              AND CAST(sc.total_score AS REAL) > 0
+        ) ORDER BY e.date
+    `, [classId]);
+
+    if (!exams.length) { lines.push('暂无考试成绩数据'); return lines; }
+
+    exams.sort((a, b) => {
+        const ia = EXAM_ORDER.indexOf(a.name), ib = EXAM_ORDER.indexOf(b.name);
+        if (ia === -1 && ib === -1) return new Date(a.date) - new Date(b.date);
+        if (ia === -1) return 1; if (ib === -1) return -1;
+        return ia - ib;
+    });
+
+    lines.push(`【考试列表】${exams.map(e => e.name).join(' → ')}`);
+
+    for (const exam of exams) {
+        const stats = await database.get(`
+            SELECT COUNT(*) as cnt, ROUND(AVG(total),1) as avg,
+                   ROUND(MAX(total),1) as max, ROUND(MIN(total),1) as min
+            FROM (SELECT SUM(CAST(sc.total_score AS REAL)) as total
+                  FROM scores sc JOIN students s ON sc.student_id=s.id
+                  WHERE s.class_id=? AND sc.exam_id=?
+                    AND sc.total_score NOT IN ('缺考','免修')
+                    AND CAST(sc.total_score AS REAL)>0
+                  GROUP BY sc.student_id) t
+        `, [classId, exam.id]);
+
+        if (!stats || !stats.cnt) continue;
+
+        const subjectAvgs = await database.all(`
+            SELECT sc.subject, ROUND(AVG(CAST(sc.total_score AS REAL)),1) as avg
+            FROM scores sc JOIN students s ON sc.student_id=s.id
+            WHERE s.class_id=? AND sc.exam_id=?
+              AND sc.total_score NOT IN ('缺考','免修')
+              AND CAST(sc.total_score AS REAL)>0
+            GROUP BY sc.subject ORDER BY sc.subject
+        `, [classId, exam.id]);
+        const subjectParts = subjectAvgs.map(s => `${s.subject}均${s.avg}`).join(' ');
+
+        const rankings = await database.all(`
+            SELECT s.name, s.student_id,
+                   ROUND(SUM(CAST(sc.total_score AS REAL)),1) as total
+            FROM scores sc JOIN students s ON sc.student_id=s.id
+            WHERE s.class_id=? AND sc.exam_id=?
+              AND sc.total_score NOT IN ('缺考','免修')
+              AND CAST(sc.total_score AS REAL)>0
+            GROUP BY s.id ORDER BY total DESC
+        `, [classId, exam.id]);
+
+        const top3 = rankings.slice(0, 3).map((r, i) => `${i + 1}.${r.name}${r.total}`);
+        const bot3 = rankings.slice(-3).map((r, i) => `${rankings.length - 2 + i}.${r.name}${r.total}`);
+        lines.push(`${exam.name}: ${stats.cnt}人 总分均${stats.avg} 最高${stats.max} 最低${stats.min} | 各科班级均分: ${subjectParts} | 前三:${top3.join(' ')} | 末三:${bot3.join(' ')}`);
+    }
+
+    return lines;
+}
+
+async function buildStudentDetailLines(studentId) {
+    const lines = [];
+    const student = await database.get('SELECT * FROM students WHERE id = ?', [studentId]);
+    const classId = student ? student.class_id : null;
+
+    const allScores = await database.all(`
+        SELECT e.name as exam_name, e.id as exam_id, e.date, s.subject, CAST(s.total_score AS REAL) as score
+        FROM scores s JOIN exams e ON s.exam_id = e.id
+        WHERE s.student_id = ? AND s.total_score NOT IN ('缺考','免修')
+          AND CAST(s.total_score AS REAL) > 0
+        ORDER BY e.date, s.subject
+    `, [studentId]);
+
+    if (!allScores.length) {
+        lines.push('暂无考试成绩');
+        return lines;
+    }
+
+    const examOrder = [];
+    const examMap = {};
+    allScores.forEach(sc => {
+        const key = `${sc.exam_name}(${sc.date})`;
+        if (!examMap[key]) {
+            examMap[key] = { exam_name: sc.exam_name, exam_date: sc.date, exam_id: sc.exam_id, subjects: {}, total: 0 };
+            examOrder.push(key);
+        }
+        examMap[key].subjects[sc.subject] = sc.score;
+        examMap[key].total += sc.score;
+    });
+
+    lines.push('【历次考试总分趋势】');
+    const totals = examOrder.map(k => examMap[k].total);
+    for (let i = 0; i < examOrder.length; i++) {
+        const k = examOrder[i];
+        const d = examMap[k];
+        const subjects = Object.entries(d.subjects).map(([s, sc]) => `${s}${sc}`).join(' ');
+        const change = i > 0 ? (d.total - totals[i - 1]).toFixed(0) : '—';
+        const arrow = i > 0 ? (d.total >= totals[i - 1] ? '↑' : '↓') : '';
+        lines.push(`${d.exam_name}(${d.exam_date}): 总分${d.total.toFixed(0)} 较前次${change >= 0 ? '+' : ''}${change}${arrow} | ${subjects}`);
+    }
+    lines.push('');
+
+    lines.push('【各科个人均分】');
+    const subjectStats = {};
+    allScores.forEach(sc => {
+        if (!subjectStats[sc.subject]) subjectStats[sc.subject] = [];
+        subjectStats[sc.subject].push(sc.score);
+    });
+    for (const sub in subjectStats) {
+        const arr = subjectStats[sub];
+        const avg = (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1);
+        const max = Math.max(...arr).toFixed(1);
+        const min = Math.min(...arr).toFixed(1);
+        lines.push(`${sub}均分${avg}（${arr.length}次, 最高${max}, 最低${min})`);
+    }
+
+    if (classId) {
+        const hwMissing = await database.all(
+            'SELECT date, subject FROM homework_data WHERE student_id=? AND submitted=0 ORDER BY date DESC LIMIT 20',
+            [studentId]
+        );
+        if (hwMissing.length) {
+            const bySubject = {};
+            hwMissing.forEach(hw => { bySubject[hw.subject] = (bySubject[hw.subject] || 0) + 1; });
+            lines.push('');
+            lines.push(`【缺交作业】${Object.entries(bySubject).map(([k, v]) => `${k}${v}次`).join(' ')}；最近: ${hwMissing.slice(0, 3).map(h => `${h.date}${h.subject}`).join(', ')}`);
+        }
+    }
+
+    return lines;
 }
 
 async function buildDashboardContext(user, selection) {
@@ -4004,111 +4258,163 @@ async function buildEventsContext(user, selection) {
     lines.push(`姓名：${user.name}，角色：教师（班主任）`);
     lines.push('');
 
+    const userClassId = user.class_id;
+    if (!userClassId) {
+        lines.push('暂无事件记录');
+        return lines.join('\n');
+    }
+
+    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [userClassId]);
+    const className = classInfo ? classInfo.name : '未知班级';
+    lines.push(`【当前班级】${className}`);
+    lines.push('');
+
     const year = parseInt(selection.year) || new Date().getFullYear();
     const month = parseInt(selection.month) || new Date().getMonth() + 1;
+    const currentMonthStr = `${year}-${String(month).padStart(2, '0')}`;
 
-    lines.push(`【当前页面】事件`);
-    lines.push(`【当前月份】${year}年${month}月`);
+    const allScoreMonths = await database.all(`
+        SELECT DISTINCT month, class_id FROM beauty_scores
+        WHERE class_id = ?
+        UNION
+        SELECT DISTINCT month, class_id FROM beauty_score_events
+        WHERE class_id = ?
+        ORDER BY month
+    `, [userClassId, userClassId]);
+
+    if (allScoreMonths.length === 0) {
+        lines.push('暂无任何美丽学分事件记录');
+        lines.push('');
+        lines.push('【回复要求】简洁精炼，只输出核心结论与可行建议，不必重复数据表格。');
+        return lines.join('\n');
+    }
+
+    const allMonthsData = await database.all(`
+        SELECT month, student_id, SUM(score) as total, COUNT(*) as event_count
+        FROM beauty_score_events
+        WHERE class_id = ?
+        GROUP BY month, student_id
+        ORDER BY month, student_id
+    `, [userClassId]);
+
+    const allScoreEventMonths = await database.all(`
+        SELECT month, student_id, SUM(score) as total, COUNT(*) as entry_count
+        FROM beauty_scores
+        WHERE class_id = ? AND events IS NOT NULL AND events != ''
+        GROUP BY month, student_id
+        ORDER BY month, student_id
+    `, [userClassId]);
+
+    const monthMap = {};
+    allScoreMonths.forEach(m => {
+        const label = m.month.substring(0, 7);
+        monthMap[m.month] = { label, count: 0, totalScore: 0, positiveCount: 0, negativeCount: 0, students: {} };
+    });
+
+    allMonthsData.forEach(r => {
+        const m = monthMap[r.month];
+        if (!m) return;
+        m.count += r.event_count;
+        m.totalScore += parseFloat(r.total || 0);
+        if (r.total >= 0) m.positiveCount += r.event_count;
+        else m.negativeCount += r.event_count;
+        m.students[r.student_id] = (m.students[r.student_id] || 0) + parseFloat(r.total || 0);
+    });
+
+    allScoreEventMonths.forEach(r => {
+        const m = monthMap[r.month];
+        if (!m) {
+            const label = r.month.substring(0, 7);
+            monthMap[r.month] = { label, count: 0, totalScore: 0, positiveCount: 0, negativeCount: 0, students: {} };
+        }
+        monthMap[r.month].count += r.entry_count;
+    });
+
+    lines.push('【所有月份事件总览】');
+    const sortedMonths = Object.keys(monthMap).sort();
+    sortedMonths.forEach(m => {
+        const d = monthMap[m];
+        const s = d.totalScore >= 0 ? '+' : '';
+        const top = Object.entries(d.students).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([sid, sc]) => `${sid} ${sc >= 0 ? '+' : ''}${sc.toFixed(0)}`).join(', ');
+        const bottom = Object.entries(d.students).sort((a, b) => a[1] - b[1]).slice(0, 2).map(([sid, sc]) => `${sid} ${sc >= 0 ? '+' : ''}${sc.toFixed(0)}`).join(', ');
+        lines.push(`${d.label}: ${d.count}条 ${s}${d.totalScore.toFixed(1)}分 | 最高 ${top} | 最低 ${bottom}`);
+    });
     lines.push('');
 
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
-    
-    // 获取当前用户管理的班级
-    const userClassId = user.class_id;
-    // 如果没有班级ID，直接返回
-    if (!userClassId) {
-        lines.push('【当月事件统计】暂无事件记录');
-        lines.push('');
-        return lines.join('\n');
-    }
 
-    // 首先检查两个表：beauty_score_events 和 beauty_scores
     let events = await database.all(`
-        SELECT bse.*, s.name as student_name, s.student_id, c.name as class_name
+        SELECT bse.entry_date, bse.month, bse.student_id, bse.row_index, bse.score, bse.event_name,
+               s.name as student_name, s.student_id as sid
         FROM beauty_score_events bse
         JOIN students s ON bse.student_id = s.student_id
-        JOIN classes c ON s.class_id = c.id
         WHERE bse.entry_date BETWEEN ? AND ? AND s.class_id = ?
-        ORDER BY bse.entry_date DESC
+        ORDER BY bse.entry_date, bse.student_id
     `, [startDate, endDate, userClassId]);
 
-    // 如果第一个表没有数据，尝试第二个表
     if (!events || events.length === 0) {
         events = await database.all(`
-            SELECT bs.*, s.name as student_name, s.student_id, c.name as class_name
+            SELECT bs.entry_date, bs.month, bs.student_id, bs.row_index, bs.score, bs.events as event_name,
+                   s.name as student_name, s.student_id as sid
             FROM beauty_scores bs
             JOIN students s ON bs.student_id = s.student_id
-            JOIN classes c ON s.class_id = c.id
             WHERE bs.entry_date BETWEEN ? AND ? AND s.class_id = ?
-            ORDER BY bs.entry_date DESC
+              AND bs.events IS NOT NULL AND bs.events != ''
+            ORDER BY bs.entry_date, bs.student_id
         `, [startDate, endDate, userClassId]);
     }
 
     if (events && events.length > 0) {
-        const positiveEvents = events.filter(e => e.is_positive);
-        const negativeEvents = events.filter(e => !e.is_positive);
+        const positiveEvents = events.filter(e => parseFloat(e.score) >= 0);
+        const negativeEvents = events.filter(e => parseFloat(e.score) < 0);
+        const totalScore = events.reduce((sum, e) => sum + parseFloat(e.score || 0), 0);
 
-        lines.push(`【当月事件统计】`);
-        lines.push(`加分事件：${positiveEvents.length}次`);
-        lines.push(`扣分事件：${negativeEvents.length}次`);
+        lines.push(`【当前页面：${year}年${month}月 - 详细事件】`);
+        lines.push(`事件${events.length}条（加分${positiveEvents.length}/扣分${negativeEvents.length}），净分${totalScore >= 0 ? '+' : ''}${totalScore.toFixed(1)}`);
         lines.push('');
 
-        // 显示具体的事件详情
-        lines.push(`【具体事件详情】`);
-        events.forEach(e => {
-            const eventType = e.is_positive ? '加分' : '扣分';
-            const eventName = e.event_name || e.events || '事件';
-            lines.push(`${e.entry_date} - ${e.student_name}(${e.student_id}) - ${e.class_name} - ${eventType}${e.score}分 - ${eventName}`);
+        const dailyEvents = {};
+        const daysInMonth = new Date(year, month, 0).getDate();
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            dailyEvents[dateStr] = [];
+        }
+        events.forEach(e => { if (e.entry_date && dailyEvents[e.entry_date]) dailyEvents[e.entry_date].push(e); });
+        const activeDays = Object.entries(dailyEvents).filter(([date, evts]) => evts.length > 0);
+
+        activeDays.forEach(([date, evts]) => {
+            const dayScore = evts.reduce((sum, e) => sum + parseFloat(e.score || 0), 0);
+            const p = dayScore >= 0 ? '+' : '';
+            const names = evts.map(e => `${e.student_name}(${e.event_name || '事件'} ${parseFloat(e.score) >= 0 ? '+' : ''}${parseFloat(e.score).toFixed(0)})`).join('; ');
+            lines.push(`${date}（${evts.length}条 ${p}${dayScore.toFixed(1)}）：${names}`);
         });
         lines.push('');
 
-        // 按学生统计
         const studentStats = {};
         events.forEach(e => {
-            if (!studentStats[e.student_id]) {
-                studentStats[e.student_id] = {
-                    name: e.student_name,
-                    student_id: e.student_id,
-                    class_name: e.class_name,
-                    positive_count: 0,
-                    negative_count: 0,
-                    total_score: 0
-                };
+            const sid = e.student_id;
+            if (!studentStats[sid]) {
+                studentStats[sid] = { name: e.student_name, sid: e.sid, total: 0, pos: 0, neg: 0 };
             }
-            if (e.is_positive) {
-                studentStats[e.student_id].positive_count++;
-                studentStats[e.student_id].total_score += e.score;
-            } else {
-                studentStats[e.student_id].negative_count++;
-                studentStats[e.student_id].total_score -= e.score;
-            }
+            const sc = parseFloat(e.score || 0);
+            studentStats[sid].total += sc;
+            if (sc >= 0) studentStats[sid].pos++; else studentStats[sid].neg++;
         });
-
-        const sortedStudents = Object.values(studentStats).sort((a, b) => b.total_score - a.total_score);
-        const topStudents = sortedStudents.slice(0, 5);
-        const bottomStudents = sortedStudents.slice(-5).reverse();
-
-        if (topStudents.length > 0) {
-            lines.push(`【表现优秀学生前5名】`);
-            topStudents.forEach((s, i) => {
-                lines.push(`第${i + 1}名：${s.name}(${s.student_id}) - ${s.class_name}，总分${s.total_score}分，加分${s.positive_count}次，扣分${s.negative_count}次`);
-            });
-            lines.push('');
-        }
-
-        if (bottomStudents.length > 0) {
-            lines.push(`【需要关注学生前5名】`);
-            bottomStudents.forEach((s, i) => {
-                lines.push(`第${i + 1}名：${s.name}(${s.student_id}) - ${s.class_name}，总分${s.total_score}分，加分${s.positive_count}次，扣分${s.negative_count}次`);
-            });
-            lines.push('');
-        }
+        const ranked = Object.values(studentStats).sort((a, b) => b.total - a.total);
+        lines.push(`【${year}年${month}月学生排名】`);
+        ranked.forEach((s, i) => {
+            const si = s.total >= 0 ? '+' : '';
+            lines.push(`${i + 1}.${s.name}(${s.sid}) ${si}${s.total.toFixed(1)}（+${s.pos}/-${s.neg}）`);
+        });
+        lines.push('');
     } else {
-        lines.push('【当月事件统计】暂无事件记录');
+        lines.push(`【当前页面：${year}年${month}月】暂无事件记录`);
         lines.push('');
     }
 
+    lines.push('【说明】用户可能要求分析任意月份或月份范围（如"4月到5月"），请基于上方各月份总览数据回答。');
+    lines.push('【回复要求】简洁精炼，只输出核心结论与可行建议，不重复数据表格。使用短句和要点列表，控制篇幅。');
     return lines.join('\n');
 }
 
@@ -4118,110 +4424,224 @@ async function buildTotalTableContext(user, selection) {
     lines.push(`姓名：${user.name}，角色：教师（班主任）`);
     lines.push('');
 
-    // 优先使用用户自己的班级ID
     let classId = user.class_id;
     if (!classId) {
-        // 如果用户没有班级ID，尝试使用选择的班级ID
         classId = selection.class_id;
     }
-    
-    const year = parseInt(selection.year);
-    const month = parseInt(selection.month);
 
     if (!classId) {
         return buildDefaultTeacherContext(user);
     }
 
     const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
-
     if (!classInfo) {
         return buildDefaultTeacherContext(user);
     }
 
-    lines.push(`【当前页面】总表`);
-    lines.push(`【当前班级】${classInfo.name}`);
-    if (year && month) {
-        lines.push(`【当前月份】${year}年${month}月`);
+    const year = parseInt(selection.year);
+    const month = parseInt(selection.month);
+    const currentMonthStr = year && month ? `${year}-${String(month).padStart(2, '0')}` : null;
+    const displayMonth = currentMonthStr ? `${year}年${month}月` : '当前月份';
+
+    lines.push(`【当前页面】美丽学分总表`);
+    lines.push(`【当前班级】${classInfo.name}（ID:${classId}）`);
+    if (currentMonthStr) lines.push(`【当前页面月份】${displayMonth}`);
+    lines.push('');
+
+    const students = await database.all(`
+        SELECT id, student_id, name FROM students WHERE class_id = ? ORDER BY student_id
+    `, [classId]);
+
+    if (students.length === 0) {
+        lines.push('该班级暂无学生');
+        lines.push('【回复要求】简洁精炼。');
+        return lines.join('\n');
+    }
+
+    const studentMap = {};
+    students.forEach(s => { studentMap[s.student_id] = s; });
+
+    const allScoreMonths = await database.all(`
+        SELECT DISTINCT month FROM beauty_scores WHERE class_id = ? ORDER BY month
+    `, [classId]);
+
+    const allEventMonths = await database.all(`
+        SELECT month, student_id, SUM(score) as total, COUNT(*) as cnt
+        FROM beauty_score_events
+        WHERE class_id = ?
+        GROUP BY month, student_id
+        ORDER BY month, student_id
+    `, [classId]);
+
+    const allScoreByMonth = await database.all(`
+        SELECT month, student_id, SUM(score) as total, COUNT(*) as indicator_count
+        FROM beauty_scores WHERE class_id = ?
+        GROUP BY month, student_id
+        ORDER BY month, student_id
+    `, [classId]);
+
+    const monthSet = new Set();
+    allScoreMonths.forEach(m => monthSet.add(m.month));
+    allEventMonths.forEach(m => monthSet.add(m.month));
+    const allMonths = Array.from(monthSet).sort();
+
+    const monthSummary = {};
+    allMonths.forEach(m => {
+        const label = m.substring(0, 7);
+        monthSummary[m] = { label, totalScore: 0, eventCount: 0, studentScores: {} };
+    });
+
+    allScoreByMonth.forEach(r => {
+        const ms = monthSummary[r.month];
+        if (!ms) return;
+        const sc = parseFloat(r.total || 0);
+        ms.totalScore += sc;
+        ms.studentScores[r.student_id] = (ms.studentScores[r.student_id] || 0) + sc;
+    });
+
+    allEventMonths.forEach(r => {
+        const ms = monthSummary[r.month];
+        if (!ms) return;
+        ms.eventCount += r.cnt;
+    });
+
+    lines.push('【美丽学分指标体系】（共4大类54项观察点）');
+    const l0Groups = {};
+    INDICATOR_TREE.forEach(item => {
+        if (!l0Groups[item.l0]) l0Groups[item.l0] = [];
+        l0Groups[item.l0].push(item);
+    });
+    for (const [l0, items] of Object.entries(l0Groups)) {
+        lines.push(`  ${l0}（${items.length}项）`);
     }
     lines.push('');
 
-    let startDate, endDate;
-    if (year && month) {
-        startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-        endDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
-    } else {
-        const now = new Date();
-        startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-        endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}`;
+    if (allMonths.length > 0) {
+        lines.push('【所有月份班级总览】');
+        allMonths.forEach(m => {
+            const d = monthSummary[m];
+            const s = d.totalScore >= 0 ? '+' : '';
+            const top = Object.entries(d.studentScores).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([sid, sc]) => `${sid} ${sc >= 0 ? '+' : ''}${sc.toFixed(0)}`).join(', ');
+            const bottom = Object.entries(d.studentScores).sort((a, b) => a[1] - b[1]).slice(0, 2).map(([sid, sc]) => `${sid} ${sc >= 0 ? '+' : ''}${sc.toFixed(0)}`).join(', ');
+            lines.push(`${d.label}: 总分${s}${d.totalScore.toFixed(1)} 事件${d.eventCount}条 | 最高 ${top} | 最低 ${bottom}`);
+        });
+        lines.push('');
+
+        if (allMonths.length >= 2) {
+            lines.push('【各学生月度趋势】');
+            const sortedStudents = students.map(s => s.student_id).sort();
+            sortedStudents.forEach(sid => {
+                const trends = allMonths.map(m => {
+                    const sc = monthSummary[m].studentScores[sid] || 0;
+                    const si = sc >= 0 ? '+' : '';
+                    return `${monthSummary[m].label}:${si}${sc.toFixed(0)}`;
+                }).join(' ');
+                const name = studentMap[sid] ? studentMap[sid].name : sid;
+                lines.push(`${name}(${sid}) ${trends}`);
+            });
+            lines.push('');
+        }
     }
 
-    // 首先尝试查询 beauty_score_events 表
-    let events = await database.all(`
-        SELECT bse.*, s.name as student_name, s.student_id
-        FROM beauty_score_events bse
-        JOIN students s ON bse.student_id = s.student_id
-        WHERE s.class_id = ? AND bse.entry_date BETWEEN ? AND ?
-        ORDER BY bse.entry_date DESC
-    `, [classId, startDate, endDate]);
-    
-    // 如果第一个表没有数据，尝试第二个表
-    if (!events || events.length === 0) {
-        events = await database.all(`
-            SELECT bs.*, s.name as student_name, s.student_id
+    let beautyScores = [];
+    let eventDetails = [];
+    if (currentMonthStr) {
+        beautyScores = await database.all(`
+            SELECT bs.student_id, bs.row_index, bs.score, bs.events
             FROM beauty_scores bs
-            JOIN students s ON bs.student_id = s.id
-            WHERE s.class_id = ? AND bs.date BETWEEN ? AND ?
-            ORDER BY bs.date DESC
+            WHERE bs.class_id = ? AND bs.month = ?
+            ORDER BY bs.student_id, bs.row_index
+        `, [classId, currentMonthStr]);
+
+        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+        const endDate = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
+        eventDetails = await database.all(`
+            SELECT bse.student_id, bse.row_index, bse.score, bse.event_name, bse.entry_date,
+                   s.name as student_name, s.student_id as sid
+            FROM beauty_score_events bse
+            JOIN students s ON bse.student_id = s.student_id
+            WHERE bse.class_id = ? AND bse.entry_date BETWEEN ? AND ?
+            ORDER BY bse.entry_date, bse.student_id
         `, [classId, startDate, endDate]);
     }
 
-    if (events.length > 0) {
-        const studentStats = {};
-        events.forEach(e => {
-            if (!studentStats[e.student_id]) {
-                studentStats[e.student_id] = {
-                    name: e.student_name,
-                    student_id: e.student_id,
-                    positive_count: 0,
-                    negative_count: 0,
-                    total_score: 0
-                };
-            }
-            if (e.is_positive) {
-                studentStats[e.student_id].positive_count++;
-                studentStats[e.student_id].total_score += e.score;
-            } else {
-                studentStats[e.student_id].negative_count++;
-                studentStats[e.student_id].total_score -= e.score;
-            }
+    if (currentMonthStr && (beautyScores.length > 0 || eventDetails.length > 0)) {
+        const studentScoreMap = {};
+        students.forEach(s => {
+            studentScoreMap[s.student_id] = {
+                name: s.name,
+                student_id: s.student_id,
+                total: 0,
+                indicatorScores: {},
+                events: []
+            };
         });
 
-        const sortedByPositive = Object.values(studentStats).sort((a, b) => b.positive_count - a.positive_count);
-        const sortedByNegative = Object.values(studentStats).sort((a, b) => a.negative_count - b.negative_count);
+        beautyScores.forEach(row => {
+            const s = studentScoreMap[row.student_id];
+            if (!s) return;
+            const score = parseFloat(row.score) || 0;
+            s.total += score;
+            const rowIdx = row.row_index;
+            if (!s.indicatorScores[rowIdx]) s.indicatorScores[rowIdx] = { score: 0, events: [] };
+            s.indicatorScores[rowIdx].score += score;
+            if (row.events) s.indicatorScores[rowIdx].events.push(row.events);
+        });
 
-        const topPositive = sortedByPositive.slice(0, 3);
-        const leastNegative = sortedByNegative.slice(0, 3);
+        eventDetails.forEach(row => {
+            const s = studentScoreMap[row.student_id];
+            if (!s) return;
+            s.events.push({ date: row.entry_date, name: row.event_name, score: parseFloat(row.score || 0) });
+        });
 
-        if (topPositive.length > 0) {
-            lines.push(`【加分最多学生前3名】`);
-            topPositive.forEach((s, i) => {
-                lines.push(`第${i + 1}名：${s.name}(${s.student_id})，加分${s.positive_count}次，总分${s.total_score}分`);
+        const rankedStudents = Object.values(studentScoreMap)
+            .filter(s => s.total !== 0 || s.events.length > 0)
+            .sort((a, b) => b.total - a.total);
+
+        lines.push(`【当前页面：${displayMonth} - 详细数据】`);
+        rankedStudents.forEach((s, i) => {
+            const eventSummary = s.events.length > 0 ? `，事件${s.events.length}条` : '';
+            lines.push(`${i + 1}.${s.name}(${s.student_id}) 总分${s.total.toFixed(1)}${eventSummary}`);
+            const scoredIndicators = Object.entries(s.indicatorScores)
+                .filter(([idx, data]) => data.score !== 0);
+            if (scoredIndicators.length > 0 && scoredIndicators.length <= 10) {
+                const parts = scoredIndicators.map(([idx, data]) => {
+                    const indicator = INDICATOR_TREE[parseInt(idx)];
+                    const pn = indicator ? indicator.point : '未知';
+                    return `${pn} ${data.score >= 0 ? '+' : ''}${data.score}`;
+                });
+                lines.push(`  > ${parts.join('; ')}`);
+            }
+        });
+        lines.push('');
+
+        const allEvents = rankedStudents.flatMap(s => s.events.map(e => ({
+            ...e,
+            student_name: s.name,
+            student_id: s.student_id
+        })));
+        if (allEvents.length > 0) {
+            const sorted = allEvents.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+            lines.push(`【${displayMonth}事件明细】（${sorted.length}条）`);
+            const compact = {};
+            sorted.forEach(e => {
+                const key = `${e.date || '未知'}_${e.name}`;
+                if (!compact[key]) compact[key] = { date: e.date, name: e.name, students: [], score: e.score };
+                compact[key].students.push(e.student_name);
+            });
+            Object.values(compact).forEach(e => {
+                const p = e.score >= 0 ? '+' : '';
+                lines.push(`${e.date || '未知'} ${e.name} ${p}${e.score}分 → ${e.students.join('、')}`);
             });
             lines.push('');
         }
-
-        if (leastNegative.length > 0) {
-            lines.push(`【扣分最少学生前3名】`);
-            leastNegative.forEach((s, i) => {
-                lines.push(`第${i + 1}名：${s.name}(${s.student_id})，扣分${s.negative_count}次，总分${s.total_score}分`);
-            });
-            lines.push('');
-        }
-    } else {
-        lines.push('【当月事件统计】暂无事件记录');
+    } else if (currentMonthStr) {
+        lines.push(`【当前页面：${displayMonth}】暂无美丽学分数据`);
         lines.push('');
     }
 
+    lines.push('【说明】用户可能要求分析任意月份或月份范围（如"4月"或"3-5月"），请基于上方各月份总览和月度趋势数据回答。');
+    lines.push('【回复要求】简洁精炼，只输出核心结论与可行建议，不重复数据表格。使用短句和要点列表，控制篇幅。');
     return lines.join('\n');
 }
 
