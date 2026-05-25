@@ -4945,10 +4945,50 @@ app.post('/api/ollama/chat', async (req, res) => {
         const qwenHost = 'dashscope.aliyuncs.com';
         
         let headersSent = false;
+        let connectionClosed = false;
+
+        // 监听客户端连接关闭事件，防止 EPIPE 错误
+        const onClientClose = () => {
+            console.log('[AI] 客户端连接已关闭');
+            connectionClosed = true;
+        };
+
+        const onClientError = (err) => {
+            console.log('[AI] 客户端连接错误:', err.message);
+            connectionClosed = true;
+        };
+
+        res.on('close', onClientClose);
+        res.on('error', onClientError);
+
+        // 安全写入函数，先检查连接状态
+        const safeWrite = (chunk) => {
+            if (connectionClosed || res.destroyed || !res.writable) {
+                return false;
+            }
+            try {
+                res.write(chunk);
+                return true;
+            } catch (err) {
+                console.log('[AI] 写入失败:', err.message);
+                connectionClosed = true;
+                return false;
+            }
+        };
+
+        const safeEnd = () => {
+            if (!connectionClosed && res.writable) {
+                try {
+                    res.end();
+                } catch (err) {
+                    console.log('[AI] 结束连接失败:', err.message);
+                }
+            }
+        };
 
         // 准备请求体，兼容 OpenAI 格式
         const requestBody = JSON.stringify({
-            model: model || 'qwen-plus', // 默认使用 qwen-plus
+            model: model || 'qwen-max', // ai 模型
             messages: messages || [],
             stream: stream !== false
         });
@@ -4964,6 +5004,11 @@ app.post('/api/ollama/chat', async (req, res) => {
                 'Authorization': `Bearer ${apiKey}`
             }
         }, (qwenRes) => {
+            if (connectionClosed) {
+                qwenRes.destroy();
+                return;
+            }
+
             if (stream !== false) {
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -4972,48 +5017,77 @@ app.post('/api/ollama/chat', async (req, res) => {
             headersSent = true;
 
             qwenRes.on('data', (chunk) => {
-                res.write(chunk);
+                if (!connectionClosed) {
+                    safeWrite(chunk);
+                } else {
+                    qwenRes.destroy();
+                }
             });
 
             qwenRes.on('end', () => {
-                res.end();
+                safeEnd();
             });
         });
 
         qwenReq.on('error', (err) => {
             console.error('Qwen API 连接失败:', err);
-            if (!headersSent) {
+            if (!headersSent && !connectionClosed) {
                 res.status(500).json({ success: false, message: '无法连接到 Qwen API: ' + err.message });
             } else {
-                res.end();
+                safeEnd();
             }
         });
+
+        // 如果客户端已关闭，直接销毁 Qwen 请求
+        if (connectionClosed) {
+            qwenReq.destroy();
+            return;
+        }
 
         qwenReq.write(requestBody);
         qwenReq.end();
 
     } catch (err) {
         console.error('AI 代理错误:', err);
-        res.status(500).json({ success: false, message: 'AI 代理错误: ' + err.message });
+        if (!res.headersSent && res.writable) {
+            res.status(500).json({ success: false, message: 'AI 代理错误: ' + err.message });
+        }
     }
 });
 
 // ===== 全局错误处理（防崩溃，放最后）=====
 app.use((err, req, res, next) => {
     console.error('[ERROR]', err.stack || err);
-    if (!res.headersSent) {
-        res.status(500).json({ success: false, message: '服务器内部错误' });
+    if (!res.headersSent && res.writable) {
+        try {
+            res.status(500).json({ success: false, message: '服务器内部错误' });
+        } catch (writeErr) {
+            console.error('[ERROR] 发送错误响应失败:', writeErr.message);
+        }
     }
 });
 
 // 404 处理（必须放在所有路由之后）
 app.use((req, res) => {
-    if (!res.headersSent) {
+    if (!res.headersSent && res.writable) {
         if (req.path.startsWith('/api/')) {
             return res.status(404).json({ success: false, message: '接口不存在' });
         }
         res.status(404).sendFile(path.join(__dirname, 'public', 'login.html'));
     }
+});
+
+// ===== 进程级错误监听，防止崩溃 =====
+process.on('uncaughtException', (err) => {
+    console.error('[FATAL] 未捕获的异常:', err);
+    console.error('[FATAL] 错误堆栈:', err.stack);
+    // 不要让进程崩溃，继续运行
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[FATAL] 未处理的 Promise 拒绝:', reason);
+    console.error('[FATAL] Promise:', promise);
+    // 不要让进程崩溃，继续运行
 });
 
 // 启动服务器
