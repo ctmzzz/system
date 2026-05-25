@@ -12,11 +12,12 @@
     if (name && nameEl) {
         nameEl.textContent = name;
     }
-
 })();
 
 // 检查登录状态
 let currentUser = null;
+let currentExamId = null;
+let currentClassId = null;
 
 async function checkAuth() {
     try {
@@ -28,6 +29,8 @@ async function checkAuth() {
         }
         currentUser = data.user;
         window.currentUser = data.user; // 暴露给 collab.js
+        window.currentExamId = currentExamId; // 暴露给 ai-chat.js
+        window.currentClassId = currentClassId; // 暴露给 ai-chat.js
         const avEl = document.getElementById('userAvatar');
         const nmEl = document.getElementById('userName');
         const userRole = data.user.role || 'teacher';
@@ -121,10 +124,49 @@ const EXAM_ORDER = [
     '高三下期中', '高三下期末'
 ];
 
+async function loadClasses() {
+    try {
+        const res = await fetch('/api/classes');
+        const data = await res.json();
+        const select = document.getElementById('classSelect');
+        if (!data.success || !data.data || data.data.length === 0) {
+            select.innerHTML = '<option value="" disabled>暂无班级</option>';
+            return;
+        }
+        const sortedClasses = [...data.data].sort((a, b) => b.id - a.id);
+        select.innerHTML = '<option value="" disabled>请选择班级</option>' +
+            sortedClasses.map(cls => `<option value="${cls.id}">${cls.name}</option>`).join('');
+        const savedClassId = localStorage.getItem('dashboardClassId');
+        const classId = savedClassId && sortedClasses.some(c => c.id == savedClassId)
+            ? savedClassId
+            : sortedClasses[0].id;
+        select.value = classId;
+        currentClassId = classId;
+        window.currentClassId = classId; // 暴露给 ai-chat.js
+        
+        // 设置班级切换事件
+        select.onchange = async function() {
+            await loadExams(); // 班级切换时重新加载考试，选择该班级有数据的考试
+            await loadDashboardData();
+        };
+    } catch (err) {
+        console.error('加载班级列表失败', err);
+    }
+}
+
 async function loadExams() {
     try {
-        const res = await fetch('/api/exams');
-        const data = await res.json();
+        const classId = document.getElementById('classSelect').value;
+        currentClassId = classId;
+        window.currentClassId = classId; // 暴露给 ai-chat.js
+        const [examsRes, latestRes] = await Promise.all([
+            fetch('/api/exams'),
+            classId ? fetch(`/api/teacher/latest-exam-for-class?class_id=${classId}`) : Promise.resolve(null)
+        ]);
+        
+        const data = await examsRes.json();
+        const latestData = latestRes ? await latestRes.json() : null;
+        
         const select = document.getElementById('examSelectTeacher');
         if (data.data.length === 0) {
             select.innerHTML = '<option value="">暂无考试数据</option>';
@@ -139,38 +181,29 @@ async function loadExams() {
             if (idxB === -1) return -1;
             return idxA - idxB;
         });
-        select.innerHTML = '<option value=""disabled>请选择考试场次</option>' +
+        select.innerHTML = '<option value="" disabled>请选择考试场次</option>' +
             sortedExams.map(exam => `<option value="${exam.id}">${exam.name}</option>`).join('');
+        
         const savedExamId = localStorage.getItem('dashboardExamId');
-        const examId = savedExamId && sortedExams.some(e => e.id == savedExamId)
-            ? savedExamId
-            : sortedExams[0].id;
+        let examId;
+        
+        if (savedExamId && sortedExams.some(e => e.id == savedExamId)) {
+            examId = savedExamId;
+        } else if (latestData && latestData.success && latestData.data && sortedExams.some(e => e.id == latestData.data.id)) {
+            examId = latestData.data.id;
+        } else {
+            examId = sortedExams[0].id;
+        }
+        
         select.value = examId;
+        currentExamId = examId;
+        window.currentExamId = examId; // 暴露给 ai-chat.js
+        
+        // 设置考试切换事件
+        select.onchange = loadDashboardData;
     } catch (err) {
         console.error('加载考试列表失败', err);
         showNoData();
-    }
-}
-
-async function loadClasses() {
-    try {
-        const res = await fetch('/api/classes');
-        const data = await res.json();
-        const select = document.getElementById('classSelect');
-        if (!data.success || !data.data || data.data.length === 0) {
-            select.innerHTML = '<option value="" disabled>暂无班级</option>';
-            return;
-        }
-        const sortedClasses = [...data.data].sort((a, b) => b.id - a.id);
-        select.innerHTML = '<option value=""disabled>请选择班级</option>' +
-            sortedClasses.map(cls => `<option value="${cls.id}">${cls.name}</option>`).join('');
-        const savedClassId = localStorage.getItem('dashboardClassId');
-        const classId = savedClassId && sortedClasses.some(c => c.id == savedClassId)
-            ? savedClassId
-            : sortedClasses[0].id;
-        select.value = classId;
-    } catch (err) {
-        console.error('加载班级列表失败', err);
     }
 }
 
@@ -312,7 +345,7 @@ async function loadSubjectAvgChart(examId, classId) {
     }
 }
 
-function renderClassRankingChart(data) {}
+function renderClassRankingChart(data) { }
 
 function renderClassStatsChart(data) {
     if (!data || data.length === 0) { showChartNoData(classStatsChart); return; }
@@ -331,10 +364,12 @@ function renderClassStatsChart(data) {
         new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#6EE7B7' }, { offset: 1, color: '#10B981' }]),
     ];
     classStatsChart.setOption({
-        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: function(params) {
-            const idx = params[0].dataIndex; const item = data[idx];
-            return `${item.subject}<br/>平均分: <b>${item.avg_score ? item.avg_score.toFixed(1) : '-'}</b><br/>参考人数: ${item.student_count || 0}`;
-        }},
+        tooltip: {
+            trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: function (params) {
+                const idx = params[0].dataIndex; const item = data[idx];
+                return `${item.subject}<br/>平均分: <b>${item.avg_score ? item.avg_score.toFixed(1) : '-'}</b><br/>参考人数: ${item.student_count || 0}`;
+            }
+        },
         grid: { left: '3%', right: '4%', bottom: subjects.length > 6 ? '15%' : '8%', top: '8%', containLabel: true },
         xAxis: { type: 'category', data: subjects, axisLabel: { rotate: subjects.length > 5 ? 30 : 0, fontSize: 12 }, axisTick: { alignWithLabel: true } },
         yAxis: { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}' } },
@@ -354,10 +389,10 @@ function renderPercentileChart(data) {
     if (data.remainder !== null) { percentiles.push('剩余学生'); values.push(parseFloat(data.remainder.toFixed(1))); }
     if (percentiles.length === 0) { showChartNoData(percentileChart); return; }
     percentileChart.setOption({
-        tooltip: { trigger: 'axis', formatter: function(params) { return `${params[0].name}<br/>平均分: ${params[0].value}`; } },
+        tooltip: { trigger: 'axis', formatter: function (params) { return `${params[0].name}<br/>平均分: ${params[0].value}`; } },
         grid: { left: '3%', right: '4%', bottom: '12%', top: '12%', containLabel: true },
         xAxis: { type: 'category', data: percentiles, axisLabel: { fontSize: 14 } },
-        yAxis: { type: 'value', min: function(value) { return Math.floor(value.min - 20); }, axisLabel: { fontSize: 12 } },
+        yAxis: { type: 'value', min: function (value) { return Math.floor(value.min - 20); }, axisLabel: { fontSize: 12 } },
         series: [{ name: '平均分', type: 'line', data: values, smooth: true, symbol: 'circle', symbolSize: 12, lineStyle: { width: 4, color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#EF4444' }, { offset: 0.5, color: '#F59E0B' }, { offset: 1, color: '#10B981' }]) }, itemStyle: { color: '#4F46E5' }, label: { show: true, position: 'top', formatter: '{c}', fontSize: 16, fontWeight: 'bold', color: '#333' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(16, 185, 129, 0.4)' }, { offset: 1, color: 'rgba(16, 185, 129, 0.05)' }]) } }],
         animationDuration: 1500, animationEasing: 'cubicOut'
     }, true);
@@ -366,7 +401,7 @@ function renderPercentileChart(data) {
 async function loadTrendData() {
     try {
         const classId = document.getElementById('classSelect').value;
-        const url = classId ? `/api/analysis/trend?class_id=${classId}` : '/api/analysis/trend';
+        const url = classId ? '/api/analysis/trend?class_id=' + classId : '/api/analysis/trend';
         const res = await fetch(url);
         const data = await res.json();
         if (!data.success || !data.data || data.data.length === 0) { showChartNoData(trendChart); return; }
@@ -394,11 +429,7 @@ function renderTrendChart(trendData) {
     const top60Data = trendData.map(d => d.top60_avg !== null ? parseFloat(d.top60_avg.toFixed(1)) : null);
     const remainderData = trendData.map(d => d.remainder_avg !== null ? parseFloat(d.remainder_avg.toFixed(1)) : null);
     trendChart.setOption({
-        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: function(params) {
-            let html = `<b>${params[0].axisValue}</b><br/>`;
-            params.forEach(p => { if (p.value !== null && p.value !== undefined) { html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>`; } });
-            return html;
-        }},
+        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: function (params) { let html = `<b>${params[0].axisValue}</b><br/>`; params.forEach(p => { if (p.value !== null && p.value !== undefined) { html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>`; } }); return html; } },
         legend: { data: ['满分总分', '前30%学生', '前60%学生', '剩余学生'], bottom: 0 },
         grid: { left: '3%', right: '4%', bottom: '15%', top: '8%', containLabel: true },
         xAxis: { type: 'category', data: examNames, boundaryGap: false, axisLabel: { rotate: 15 } },
@@ -416,6 +447,10 @@ function renderTrendChart(trendData) {
 async function loadDashboardData() {
     const examId = document.getElementById('examSelectTeacher').value;
     const classId = document.getElementById('classSelect').value;
+    currentExamId = examId;
+    currentClassId = classId;
+    window.currentExamId = examId; // 暴露给 ai-chat.js
+    window.currentClassId = classId; // 暴露给 ai-chat.js
     localStorage.setItem('dashboardExamId', examId);
     localStorage.setItem('dashboardClassId', classId);
     await loadStatsOverview();
@@ -464,11 +499,16 @@ async function loadStudentExams() {
         examsData.data.sort((a, b) => new Date(b.date) - new Date(a.date));
         select.innerHTML = examsData.data.map(exam => `<option value="${exam.id}">${exam.name}</option>`).join('');
 
+        let examId;
         if (latestData.success && latestData.data) {
-            select.value = latestData.data.id;
+            examId = latestData.data.id;
+            select.value = examId;
         } else {
-            select.value = examsData.data[0].id;
+            examId = examsData.data[0].id;
+            select.value = examId;
         }
+        currentExamId = examId;
+        window.currentExamId = examId; // 暴露给 ai-chat.js
         await loadStudentDashboardData();
     } catch (err) {
         console.error('加载考试列表失败', err);
@@ -477,6 +517,8 @@ async function loadStudentExams() {
 
 async function loadStudentDashboardData() {
     const examId = document.getElementById('examSelect').value;
+    currentExamId = examId;
+    window.currentExamId = examId; // 暴露给 ai-chat.js
     if (!examId) {
         document.getElementById('studentTotalScore').textContent = '-';
         document.getElementById('studentClassRank').textContent = '-';
@@ -512,25 +554,14 @@ function renderRadarChart(subjects) {
     if (!subjects || subjects.length === 0) {
         radarChart.clear();
         radarChart.setOption({
-            title: {
-                text: '暂无成绩数据',
-                left: 'center',
-                top: 'center',
-                textStyle: {
-                    color: '#999',
-                    fontSize: 14
-                }
-            },
+            title: { text: '暂无成绩数据', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } },
             series: []
         }, true);
         return;
     }
 
     // 雷达图指标
-    const indicator = subjects.map(s => ({
-        name: s.subject,
-        max: 100
-    }));
+    const indicator = subjects.map(s => ({ name: s.subject, max: 100 }));
 
     // 分数数组
     const values = subjects.map(s => {
@@ -541,184 +572,41 @@ function renderRadarChart(subjects) {
     });
 
     radarChart.setOption({
-        tooltip: {
-            trigger: 'item',
-
-            formatter: function () {
-
-                let html = '';
-
-                subjects.forEach(s => {
-
-                    let text = '';
-
-                    if (s.status === '缺考') {
-                        text = '<span style="color:#EF4444">缺考</span>';
-                    } else if (s.status === '免修') {
-                        text = '<span style="color:#F59E0B">免修</span>';
-                    } else if (s.status === '无成绩') {
-                        text = '<span style="color:#9CA3AF">无成绩</span>';
-                    } else {
-                        text = `<b>${s.score.toFixed(1)} 分</b>`;
-                    }
-
-                    html += `
-                        <div style="margin:4px 0">
-                            ${s.subject}：${text}
-                        </div>
-                    `;
-                });
-
-                return html;
-            }
-        },
-
+        tooltip: { trigger: 'item', formatter: function () { let html = ''; subjects.forEach(s => { let text = ''; if (s.status === '缺考') { text = '<span style="color:#EF4444">缺考</span>'; } else if (s.status === '免修') { text = '<span style="color:#F59E0B">免修</span>'; } else if (s.status === '无成绩') { text = '<span style="color:#9CA3AF">无成绩</span>'; } else { text = `<b>${s.score.toFixed(1)} 分</b>`; } html += `<div style="margin:4px 0;">${s.subject}：${text}</div>`; }); return html; } },
         radar: {
-            indicator,
-
-            shape: 'polygon',
-
-            splitNumber: 5,
-
+            indicator, shape: 'polygon', splitNumber: 5,
             axisName: {
-
                 formatter: function (name) {
-
                     const s = subjects.find(x => x.subject === name);
-
                     if (!s) return name;
-
-                    if (s.status === '缺考') {
-                        return `${name}\n{absent|缺考}`;
-                    }
-
-                    if (s.status === '免修') {
-                        return `${name}\n{exempt|免修}`;
-                    }
-
-                    if (s.status === '无成绩') {
-                        return `${name}\n{none|无成绩}`;
-                    }
-
+                    if (s.status === '缺考') { return `${name}\n{absent|缺考}`; }
+                    if (s.status === '免修') { return `${name}\n{exempt|免修}`; }
+                    if (s.status === '无成绩') { return `${name}\n{none|无成绩}`; }
                     return name;
                 },
-
                 rich: {
-
-                    absent: {
-                        color: '#EF4444',
-                        fontSize: 12,
-                        fontWeight: 'bold'
-                    },
-
-                    exempt: {
-                        color: '#F59E0B',
-                        fontSize: 12,
-                        fontWeight: 'bold'
-                    },
-
-                    none: {
-                        color: '#9CA3AF',
-                        fontSize: 12
-                    }
+                    absent: { color: '#EF4444', fontSize: 12, fontWeight: 'bold' },
+                    exempt: { color: '#F59E0B', fontSize: 12, fontWeight: 'bold' },
+                    none: { color: '#9CA3AF', fontSize: 12 }
                 },
-
-                color: '#333',
-                fontSize: 14,
-                fontWeight: 600
+                color: '#333', fontSize: 14, fontWeight: 600
             },
-
-            splitLine: {
-                lineStyle: {
-                    color: 'rgba(0,0,0,0.1)'
-                }
-            },
-
-            splitArea: {
-                areaStyle: {
-                    color: [
-                        'rgba(79,70,229,0.02)',
-                        'rgba(79,70,229,0.05)'
-                    ]
-                }
-            },
-
-            axisLine: {
-                lineStyle: {
-                    color: 'rgba(0,0,0,0.1)'
-                }
-            }
+            splitLine: { lineStyle: { color: 'rgba(0,0,0,0.1)' } },
+            splitArea: { areaStyle: { color: ['rgba(79,70,229,0.02)', 'rgba(79,70,229,0.05)'] } },
+            axisLine: { lineStyle: { color: 'rgba(0,0,0,0.1)' } }
         },
-
         series: [{
             type: 'radar',
-
-            data: [{
-                value: values,
-                name: '各科成绩'
-            }],
-
-            symbol: 'circle',
-
-            symbolSize: 8,
-
-            itemStyle: {
-                color: '#4F46E5'
-            },
-
-            lineStyle: {
-                width: 3,
-                color: '#4F46E5'
-            },
-
-
-
-            areaStyle: {
-                color: 'rgba(79,70,229,0.2)'
-            },
-
+            data: [{ value: values, name: '各科成绩' }],
+            symbol: 'circle', symbolSize: 8,
+            itemStyle: { color: '#4F46E5' },
+            lineStyle: { width: 3, color: '#4F46E5' },
+            areaStyle: { color: 'rgba(79,70,229,0.2)' },
             label: {
                 show: true,
-
-                formatter: function (params) {
-
-                    const idx = params.dimensionIndex;
-
-                    const s = subjects[idx];
-
-                    if (!s) return '';
-
-                    if (s.status !== 'normal') {
-                        return '';
-                    }
-
-                    if (s.status === '免修') return '免修';
-
-                    if (s.status === '无成绩') return '无成绩';
-
-                    return s.score.toFixed(1);
-                },
-
-                fontSize: 12,
-
-                fontWeight: 'bold',
-
-                color: function (params) {
-
-                    const idx = params.dimensionIndex;
-
-                    const s = subjects[idx];
-
-                    if (!s) return '#4F46E5';
-
-                    if (s.status === '缺考') return '#EF4444';
-
-                    if (s.status === '免修') return '#F59E0B';
-
-                    if (s.status === '无成绩') return '#9CA3AF';
-
-                    return '#4F46E5';
-                }
+                formatter: function (params) { const idx = params.dimensionIndex; const s = subjects[idx]; if (!s) return ''; if (s.status !== 'normal') { return ''; } if (s.status === '免修') return '免修'; if (s.status === '无成绩') return '无成绩'; return s.score.toFixed(1); },
+                fontSize: 12, fontWeight: 'bold',
+                color: function (params) { const idx = params.dimensionIndex; const s = subjects[idx]; if (!s) return '#4F46E5'; if (s.status === '缺考') return '#EF4444'; if (s.status === '免修') return '#F59E0B'; if (s.status === '无成绩') return '#9CA3AF'; return '#4F46E5'; }
             }
         }]
     }, true);

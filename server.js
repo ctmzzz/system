@@ -165,7 +165,7 @@ const KICK_THRESHOLD = 5;
 const TIME_WINDOW_MS = 10 * 60 * 1000;
 
 // 请假单图片存储目录
-const IMAGE_DIR = 'D:\\mysql image';
+const IMAGE_DIR = 'C:\\serverimage';
 if (!fs.existsSync(IMAGE_DIR)) {
     fs.mkdirSync(IMAGE_DIR, { recursive: true });
     console.log('已创建图片存储目录:', IMAGE_DIR);
@@ -2466,7 +2466,8 @@ app.get('/api/student/latest-exam-with-data', requireAuth, async (req, res) => {
                 SELECT 1 FROM scores sc
                 WHERE sc.exam_id = e.id AND sc.student_id = ?
                   AND sc.total_score NOT IN ('缺考', '免修')
-                  AND CAST(sc.total_score AS REAL) >= 0
+                  AND sc.subject IS NOT NULL AND sc.subject != ''
+                  AND CAST(sc.total_score AS REAL) > 0
             )
             ORDER BY e.date DESC
             LIMIT 1
@@ -2475,6 +2476,34 @@ app.get('/api/student/latest-exam-with-data', requireAuth, async (req, res) => {
         res.json({ success: true, data: exam || null });
     } catch (err) {
         console.error('查询最新有成绩考试错误:', err.message);
+        res.json({ success: false, message: err.message });
+    }
+});
+
+// 获取指定班级最新有成绩的考试ID（教师端默认选中）
+app.get('/api/teacher/latest-exam-for-class', requireAuth, async (req, res) => {
+    const { class_id } = req.query;
+    if (!class_id) {
+        return res.json({ success: false, message: '缺少班级ID' });
+    }
+    try {
+        const exam = await database.get(`
+            SELECT e.id, e.name FROM exams e
+            WHERE EXISTS (
+                SELECT 1 FROM scores sc
+                JOIN students s ON sc.student_id = s.id
+                WHERE sc.exam_id = e.id AND s.class_id = ?
+                  AND sc.total_score NOT IN ('缺考', '免修')
+                  AND sc.subject IS NOT NULL AND sc.subject != ''
+                  AND CAST(sc.total_score AS REAL) > 0
+            )
+            ORDER BY e.date DESC
+            LIMIT 1
+        `, [class_id]);
+
+        res.json({ success: true, data: exam || null });
+    } catch (err) {
+        console.error('查询班级最新有成绩考试错误:', err.message);
         res.json({ success: false, message: err.message });
     }
 });
@@ -3658,102 +3687,170 @@ async function buildDashboardContext(user, selection) {
     const examId = selection.exam_id;
     const classId = selection.class_id;
 
-    if (!examId || !classId) {
+    if (!classId) {
         return buildDefaultTeacherContext(user);
     }
 
-    const exam = await database.get('SELECT * FROM exams WHERE id = ?', [examId]);
     const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
 
-    if (!exam || !classInfo) {
+    if (!classInfo) {
         return buildDefaultTeacherContext(user);
     }
 
     lines.push(`【当前页面】成绩分析`);
-    lines.push(`【当前考试】${exam.name}（${exam.date}）`);
     lines.push(`【当前班级】${classInfo.name}`);
     lines.push('');
 
-    const stats = await database.get(`
-        SELECT COUNT(DISTINCT sc.student_id) as student_count,
-               ROUND(AVG(CAST(sc.total_score AS REAL)), 1) as avg_score,
-               ROUND(MAX(CAST(sc.total_score AS REAL)), 1) as max_score,
-               ROUND(MIN(CAST(sc.total_score AS REAL)), 1) as min_score
-        FROM scores sc
-        JOIN students s ON sc.student_id = s.id
-        WHERE s.class_id = ? AND sc.exam_id = ?
-          AND sc.total_score NOT IN ('缺考', '免修')
-          AND CAST(sc.total_score AS REAL) > 0
-    `, [classId, examId]);
+    // 获取班级所有学生信息
+    const students = await database.all(`
+        SELECT id, name, student_id
+        FROM students
+        WHERE class_id = ?
+        ORDER BY student_id
+    `, [classId]);
 
-    if (stats && stats.student_count > 0) {
-        lines.push(`【班级成绩统计】参考${stats.student_count}人，平均分${stats.avg_score}，最高${stats.max_score}，最低${stats.min_score}`);
+    if (students.length > 0) {
+        const studentList = students.map(s => `${s.name}(${s.student_id})`).join('，');
+        lines.push(`【班级学生列表】${studentList}`);
+        lines.push('');
+    }
+
+    // 定义考试顺序（同前端）
+    const EXAM_ORDER = [
+        '高一上期中', '高一上期末',
+        '高一下期中', '高一下期末',
+        '高二上期中', '高二上期末',
+        '高二下期中', '高二下期末',
+        '高三上期中', '高三上期末',
+        '高三下期中', '高三下期末'
+    ];
+
+    // 获取该班级所有有数据的考试
+    const allExamsWithData = await database.all(`
+        SELECT DISTINCT e.id, e.name, e.date
+        FROM exams e
+        WHERE EXISTS (
+            SELECT 1 FROM scores sc
+            JOIN students s ON sc.student_id = s.id
+            WHERE sc.exam_id = e.id AND s.class_id = ?
+              AND sc.total_score NOT IN ('缺考', '免修')
+              AND sc.subject IS NOT NULL AND sc.subject != ''
+              AND CAST(sc.total_score AS REAL) > 0
+        )
+        ORDER BY e.date
+    `, [classId]);
+
+    // 按 EXAM_ORDER 排序考试
+    const sortedExams = allExamsWithData.sort((a, b) => {
+        const idxA = EXAM_ORDER.indexOf(a.name);
+        const idxB = EXAM_ORDER.indexOf(b.name);
+        if (idxA === -1 && idxB === -1) return new Date(a.date) - new Date(b.date);
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+    });
+
+    if (sortedExams.length > 0) {
+        lines.push(`【考试序列】按时间顺序：${sortedExams.map(e => e.name).join(' → ')}`);
         lines.push('');
 
-        const subjectStats = await database.all(`
-            SELECT sc.subject,
-                   ROUND(AVG(CAST(sc.total_score AS REAL)), 1) as avg_score,
-                   COUNT(*) as cnt
-            FROM scores sc
-            JOIN students s ON sc.student_id = s.id
-            WHERE s.class_id = ? AND sc.exam_id = ?
-              AND sc.total_score NOT IN ('缺考', '免修')
-              AND CAST(sc.total_score AS REAL) > 0
-            GROUP BY sc.subject
-            ORDER BY sc.subject
-        `, [classId, examId]);
+        // 获取当前选择的考试索引
+        let currentExamIndex = -1;
+        if (examId) {
+            currentExamIndex = sortedExams.findIndex(e => e.id == examId);
+        }
 
-        if (subjectStats.length > 0) {
-            const parts = subjectStats.map(sub => `${sub.subject}均分${sub.avg_score}`);
-            lines.push(`【各科均分】${parts.join('，')}`);
+        if (currentExamIndex >= 0) {
+            lines.push(`【当前选择】第${currentExamIndex + 1}场考试：${sortedExams[currentExamIndex].name}`);
             lines.push('');
         }
 
-        const topStudents = await database.all(`
-            SELECT s.name, s.student_id,
-                   ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total
-            FROM scores sc
-            JOIN students s ON sc.student_id = s.id
-            WHERE s.class_id = ? AND sc.exam_id = ?
-              AND sc.total_score NOT IN ('缺考', '免修')
-              AND CAST(sc.total_score AS REAL) > 0
-            GROUP BY s.id
-            ORDER BY total DESC
-            LIMIT 5
-        `, [classId, examId]);
+        // 为每一场考试提供数据
+        for (let i = 0; i < sortedExams.length; i++) {
+            const exam = sortedExams[i];
+            lines.push(`---【第${i + 1}场考试：${exam.name}】---`);
 
-        if (topStudents.length > 0) {
-            const topParts = topStudents.map((s, i) => `第${i + 1}名：${s.name}(${s.student_id}) 总分${s.total}`);
-            lines.push(`【前5名】${topParts.join('；')}`);
-            lines.push('');
-        }
+            const stats = await database.get(`
+                SELECT COUNT(*) as student_count,
+                       ROUND(AVG(total), 1) as avg_score,
+                       ROUND(MAX(total), 1) as max_score,
+                       ROUND(MIN(total), 1) as min_score
+                FROM (
+                    SELECT SUM(CAST(sc.total_score AS REAL)) as total
+                    FROM scores sc
+                    JOIN students s ON sc.student_id = s.id
+                    WHERE s.class_id = ? AND sc.exam_id = ?
+                      AND sc.total_score NOT IN ('缺考', '免修')
+                      AND CAST(sc.total_score AS REAL) > 0
+                    GROUP BY sc.student_id
+                ) as student_totals
+            `, [classId, exam.id]);
 
-        const bottomStudents = await database.all(`
-            SELECT s.name, s.student_id,
-                   ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total
-            FROM scores sc
-            JOIN students s ON sc.student_id = s.id
-            WHERE s.class_id = ? AND sc.exam_id = ?
-              AND sc.total_score NOT IN ('缺考', '免修')
-              AND CAST(sc.total_score AS REAL) > 0
-            GROUP BY s.id
-            ORDER BY total ASC
-            LIMIT 5
-        `, [classId, examId]);
+            if (stats && stats.student_count > 0) {
+                lines.push(`班级成绩统计：参考${stats.student_count}人，平均分${stats.avg_score}，最高${stats.max_score}，最低${stats.min_score}`);
 
-        if (bottomStudents.length > 0) {
-            const bottomParts = bottomStudents.map((s, i) => `${s.name}(${s.student_id}) 总分${s.total}`);
-            lines.push(`【后5名】${bottomParts.join('；')}`);
+                // 获取该考试的学生详细成绩（只有总分）
+                const examStudentScores = await database.all(`
+                    SELECT s.name, s.student_id,
+                           ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total_score
+                    FROM scores sc
+                    JOIN students s ON sc.student_id = s.id
+                    WHERE s.class_id = ? AND sc.exam_id = ?
+                      AND sc.total_score NOT IN ('缺考', '免修')
+                      AND CAST(sc.total_score AS REAL) > 0
+                    GROUP BY s.id
+                    ORDER BY s.student_id
+                `, [classId, exam.id]);
+
+                if (examStudentScores.length > 0) {
+                    const studentParts = examStudentScores.map(s => `${s.name}总分${s.total_score}`);
+                    lines.push(`学生总分：${studentParts.join('，')}`);
+                }
+            }
             lines.push('');
         }
     }
 
-    lines.push('【你的任务】');
-    lines.push('你是一位经验丰富的教育数据分析师。请基于以上班级成绩数据，为这位班主任老师提供：');
-    lines.push('1. 简要概述当前班级学生成绩的整体情况和特点；');
-    lines.push('2. 指出需要重点关注的学生；');
-    lines.push('3. 给出具体的督促学生学习的管理建议和教学策略。');
-    lines.push('请用中文回答，语言专业但亲切，控制在300字以内。注意：输出文本结尾不要加上"柯宇"这个教师名字。');
+    lines.push('');
+    lines.push('=== 以下是最重要的规则，违反即为错误 ===');
+    lines.push('');
+
+    lines.push('【绝对禁止】');
+    lines.push('1. 禁编造任何数字：只能引用上面明确写出的平均分、最高分、最低分；');
+    lines.push('2. 禁提"年级"：上面只提供了一个班级的数据，无年级数据，禁止说"年级排名""年级均值""位列年级X%""年级中上"等任何含"年级"的表述；');
+    lines.push('3. 禁提"及格率""优秀率"：上面没有提供任何比率数据，禁止编造；');
+    lines.push('4. 禁提任何单科（语文、数学、英语等）：只有总分数据，没有单科数据，禁止分析或提及任何单科；');
+    lines.push('5. 禁提其他班级学生：只需分析上面列出的当前班级学生；');
+    lines.push('');
+
+    lines.push('【你拥有的数据】');
+    if (sortedExams.length > 0) {
+        lines.push(`你拥有：1个班级、${sortedExams.length}场考试的成绩数据。`);
+        lines.push(`考试按时间顺序排列：${sortedExams.map((e, i) => `第${i+1}场${e.name}`).join('、')}`);
+        lines.push('每场考试的数据包括：班级平均分/最高分/最低分、学生总分。');
+        lines.push('注意：没有单科成绩数据，只分析总分。');
+    } else {
+        lines.push('你只有：1个班级的学生名单。没有考试成绩数据。');
+    }
+    lines.push('');
+
+    lines.push('【回答要求】');
+    if (sortedExams.length > 0) {
+        lines.push('- 只分析总分情况，不要提到任何单科；');
+        lines.push('- 用户说"这学期""当前考试"或类似：请使用当前选择的那一场考试的数据；');
+        lines.push('- 用户说"跟上次考试""跟上一次对比"或类似：请使用当前选择的考试和它的前一场考试进行对比；');
+        lines.push('- 用户说"跟下一次对比"或类似：请使用当前选择的考试和它的后一场考试进行对比；');
+        lines.push('- 用户没有指定考试：默认使用当前选择的那一场考试的数据；');
+        lines.push('- 提到学生时，只能用上面列出的学生姓名和成绩；');
+        lines.push('- 如果数据不足以得出某个结论，就说"当前数据不足以判断"，不要编造；');
+        lines.push('- 回答控制在150-300字，简洁专业。');
+    } else {
+        lines.push('- 请提醒用户先选择考试场次；');
+        lines.push('- 可以简单介绍当前班级的基本信息（学生人数和名单）；');
+        lines.push('- 回答控制在100字以内。');
+    }
+    lines.push('');
+    lines.push('注意：输出文本结尾不要加上"柯宇"这个教师名字。');
 
     return lines.join('\n');
 }
@@ -4840,24 +4937,33 @@ async function buildStudentContext(user, page, selection) {
     return lines.join('\n');
 }
 
-// ===== Ollama AI 代理端点 =====
+// ===== Qwen AI 代理端点 (使用阿里云 DashScope API) =====
 app.post('/api/ollama/chat', async (req, res) => {
     try {
         const { model, messages, stream } = req.body;
-        const ollamaHost = '192.168.3.6';
-        const ollamaPort = 11434;
+        const apiKey = 'sk-79d6dec0d9704699be000aa0d14d5b55';
+        const qwenHost = 'dashscope.aliyuncs.com';
         
         let headersSent = false;
 
-        const ollamaReq = http.request({
-            hostname: ollamaHost,
-            port: ollamaPort,
-            path: '/api/chat',
+        // 准备请求体，兼容 OpenAI 格式
+        const requestBody = JSON.stringify({
+            model: model || 'qwen-plus', // 默认使用 qwen-plus
+            messages: messages || [],
+            stream: stream !== false
+        });
+
+        const https = require('https');
+        const qwenReq = https.request({
+            hostname: qwenHost,
+            port: 443,
+            path: '/compatible-mode/v1/chat/completions',
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
             }
-        }, (ollamaRes) => {
+        }, (qwenRes) => {
             if (stream !== false) {
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -4865,30 +4971,26 @@ app.post('/api/ollama/chat', async (req, res) => {
             }
             headersSent = true;
 
-            ollamaRes.on('data', (chunk) => {
+            qwenRes.on('data', (chunk) => {
                 res.write(chunk);
             });
 
-            ollamaRes.on('end', () => {
+            qwenRes.on('end', () => {
                 res.end();
             });
         });
 
-        ollamaReq.on('error', (err) => {
-            console.error('Ollama 连接失败:', err);
+        qwenReq.on('error', (err) => {
+            console.error('Qwen API 连接失败:', err);
             if (!headersSent) {
-                res.status(500).json({ success: false, message: '无法连接到 Ollama 服务: ' + err.message });
+                res.status(500).json({ success: false, message: '无法连接到 Qwen API: ' + err.message });
             } else {
                 res.end();
             }
         });
 
-        ollamaReq.write(JSON.stringify({
-            model: model || 'qwen2.5:3b',
-            messages: messages || [],
-            stream: stream !== false
-        }));
-        ollamaReq.end();
+        qwenReq.write(requestBody);
+        qwenReq.end();
 
     } catch (err) {
         console.error('AI 代理错误:', err);

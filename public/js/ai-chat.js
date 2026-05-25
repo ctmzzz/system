@@ -1,7 +1,7 @@
 (function () {
     var messages = [];
     var PROXY_URL = '/api/ollama/chat';
-    var MODEL_NAME = 'qwen2.5:3b';
+    var MODEL_NAME = 'qwen-plus';
     var hasInitialAnalysis = false;
     var isAnalyzing = false;
     var userRole = '';
@@ -16,6 +16,7 @@
     var startTop = 0;
     var startWidth = 0;
     var startHeight = 0;
+    var lastChatPage = null; // 记录上次打开对话时的页面
 
     function createFloatBtn() {
         var btn = document.createElement('button');
@@ -38,7 +39,7 @@
         var title = document.createElement('span');
         title.id = 'aiChatTitle';
         title.style.cssText = 'font-size:16px;font-weight:600;';
-        title.textContent = 'AI分析助手';
+        title.textContent = 'AI助手';
 
         var closeBtn = document.createElement('button');
         closeBtn.id = 'aiChatClose';
@@ -313,6 +314,10 @@
             botBubble.textContent = '正在分析...';
             updateHint('AI正在分析数据...');
 
+            var isNetworkTimeout = true;
+            var controller = new AbortController();
+            var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
+
             var response = await fetch(PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -320,8 +325,13 @@
                     model: MODEL_NAME,
                     messages: messages,
                     stream: true
-                })
+                }),
+                signal: controller.signal
             });
+
+            clearTimeout(timeoutId);
+            isNetworkTimeout = false;
+            timeoutId = setTimeout(function() { controller.abort(); }, 60000);
 
             if (!response.ok) {
                 throw new Error('AI服务返回错误: ' + response.status);
@@ -340,9 +350,25 @@
 
                 for (var i = 0; i < lines.length; i++) {
                     try {
-                        var data = JSON.parse(lines[i]);
+                        var line = lines[i];
+                        // 移除可能的 "data: " 前缀
+                        if (line.startsWith('data: ')) {
+                            line = line.substring(6);
+                        }
+                        // 跳过 [DONE] 标记
+                        if (line === '[DONE]') {
+                            continue;
+                        }
+                        var data = JSON.parse(line);
+                        // 兼容 Ollama 和 OpenAI 两种格式
                         if (data.message && data.message.content) {
+                            // Ollama 格式
                             botText += data.message.content;
+                            botBubble.innerHTML = formatText(botText);
+                            scrollToBottom();
+                        } else if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
+                            // OpenAI/Qwen 格式
+                            botText += data.choices[0].delta.content;
                             botBubble.innerHTML = formatText(botText);
                             scrollToBottom();
                         }
@@ -350,23 +376,32 @@
                 }
             }
 
+            clearTimeout(timeoutId);
+
             if (!botText) {
                 botBubble.textContent = 'AI返回了空内容，请稍后重试或手动输入问题。';
             } else {
                 messages.push({ role: 'assistant', content: botText });
             }
 
-            // 将提示信息移到下面
             removeHint();
             var finalHint = createHint('以上为自动分析结果，您可继续提问');
             msgArea.appendChild(finalHint);
 
         } catch (error) {
+            clearTimeout(timeoutId);
             console.error('[AI分析] 失败:', error.message || error);
             if (botBubble) {
-                botBubble.textContent = '分析失败，请检查AI服务是否正常运行。\n您也可以在下方手动输入问题。';
+                if (error.name === 'AbortError') {
+                    if (isNetworkTimeout) {
+                        botBubble.textContent = '❌ 网络连接失败，请稍后再试';
+                    } else {
+                        botBubble.textContent = '服务器繁忙，请稍后再试';
+                    }
+                } else {
+                    botBubble.textContent = '❌ 网络连接失败，请稍后再试';
+                }
             }
-            // 将提示信息移到下面
             removeHint();
             var errorHint = createHint('自动分析失败，您可手动输入问题');
             msgArea.appendChild(errorHint);
@@ -413,13 +448,19 @@
         var text = input.value.trim();
         if (!text) return;
 
-        if (messages.length === 0) {
+        // 教师端：首次提问先刷新上下文（获取考试班级数据），但不自动分析
+        if (userRole === 'teacher' && messages.length === 0) {
+            await refreshContext();
+        }
+        // 学生端：首次提问先自动分析
+        else if (messages.length === 0) {
             await doInitialAnalysis();
             if (messages.length === 0) return;
         }
-
-        // 刷新当前页面的上下文数据
-        await refreshContext();
+        // 非首次提问都刷新上下文
+        else {
+            await refreshContext();
+        }
 
         messages.push({ role: 'user', content: text });
         input.value = '';
@@ -427,6 +468,10 @@
 
         addUserMessage(text);
         var botBubble = createBotBubble();
+
+        var isNetworkTimeout = true;
+        var controller = new AbortController();
+        var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
 
         try {
             var response = await fetch(PROXY_URL, {
@@ -436,8 +481,13 @@
                     model: MODEL_NAME,
                     messages: messages,
                     stream: true
-                })
+                }),
+                signal: controller.signal
             });
+
+            clearTimeout(timeoutId);
+            isNetworkTimeout = false;
+            timeoutId = setTimeout(function() { controller.abort(); }, 60000);
 
             if (!response.ok) {
                 throw new Error('网络错误: ' + response.status);
@@ -456,9 +506,25 @@
 
                 for (var i = 0; i < lines.length; i++) {
                     try {
-                        var data = JSON.parse(lines[i]);
+                        var line = lines[i];
+                        // 移除可能的 "data: " 前缀
+                        if (line.startsWith('data: ')) {
+                            line = line.substring(6);
+                        }
+                        // 跳过 [DONE] 标记
+                        if (line === '[DONE]') {
+                            continue;
+                        }
+                        var data = JSON.parse(line);
+                        // 兼容 Ollama 和 OpenAI 两种格式
                         if (data.message && data.message.content) {
+                            // Ollama 格式
                             botText += data.message.content;
+                            botBubble.innerHTML = formatText(botText);
+                            scrollToBottom();
+                        } else if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
+                            // OpenAI/Qwen 格式
+                            botText += data.choices[0].delta.content;
                             botBubble.innerHTML = formatText(botText);
                             scrollToBottom();
                         }
@@ -466,10 +532,21 @@
                 }
             }
 
+            clearTimeout(timeoutId);
+
             messages.push({ role: 'assistant', content: botText });
 
         } catch (error) {
-            botBubble.textContent = '❌ 网络连接失败，请稍后再试';
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                if (isNetworkTimeout) {
+                    botBubble.textContent = '❌ 网络连接失败，请稍后再试';
+                } else {
+                    botBubble.textContent = '服务器繁忙，请稍后再试';
+                }
+            } else {
+                botBubble.textContent = '❌ 网络连接失败，请稍后再试';
+            }
             console.error(error);
         }
 
@@ -481,54 +558,89 @@
         if (!chatOverlay) return;
         chatOverlay.style.display = 'flex';
 
-        // 每次打开聊天都重新分析，确保使用最新选择的时间范围
-        if (!isAnalyzing) {
-            // 重置状态
-            messages = [];
-            hasInitialAnalysis = false;
-            // 清空聊天记录
-            var container = document.getElementById('aiChatMessages');
-            container.innerHTML = '';
-            
-            // 在这些页面不自动生成分析：events, total-table, attendance, homework-data
-            var noAutoAnalysisPages = ['/events', '/total-table', '/attendance', '/homework-data'];
-            if (noAutoAnalysisPages.includes(currentPage)) {
-                // 不自动生成分析，显示提示
-                var hint = createHint('有什么我可以帮助您的吗？');
-                container.appendChild(hint);
-                return;
-            }
-            
-            // 在 detail-analysis 页面检查是否已选择学生
-            if (currentPage === '/detail-analysis') {
-                var isTeacher = userRole === 'teacher';
-                var hasSelection = false;
+        var container = document.getElementById('aiChatMessages');
+        var isPageChanged = lastChatPage !== currentPage;
+
+        // 只有切换页面或从未打开过时才重置
+        if (isPageChanged || lastChatPage === null) {
+            if (!isAnalyzing) {
+                // 重置状态
+                messages = [];
+                hasInitialAnalysis = false;
+                // 清空聊天记录
+                container.innerHTML = '';
                 
-                if (isTeacher) {
-                    // 教师端需要选择班级和学生
-                    hasSelection = window.currentClassId && window.currentStudentId;
+                // detail-analysis页面（教师端）：自动分析学生
+                if (userRole === 'teacher' && currentPage === '/detail-analysis') {
+                    var hasSelection = window.currentClassId && window.currentStudentId;
                     if (!hasSelection) {
-                        // 显示提示信息
+                        // 未选择学生，显示提示
                         var hintDiv = document.createElement('div');
                         hintDiv.style.cssText = 'align-self:center;background:#fef3c7;color:#92400e;font-size:14px;padding:10px 16px;border-radius:12px;max-width:80%;text-align:center;';
                         hintDiv.textContent = '请先在页面上选择班级和学生，我才能为您提供分析服务。';
                         container.appendChild(hintDiv);
-                        return; // 不进行初始分析
+                        lastChatPage = currentPage;
+                        return;
+                    } else {
+                        // 已选择学生，自动分析
+                        doInitialAnalysis();
+                        lastChatPage = currentPage;
+                        return;
                     }
-                } else {
-                    // 学生端需要有学生ID
-                    hasSelection = window.currentStudentId;
+                }
+                
+                // 教师端（非detail-analysis）：直接显示欢迎文本
+                if (userRole === 'teacher') {
+                    var userName = window.currentUser && window.currentUser.name ? window.currentUser.name : '';
+                    var welcomeText = userName ? userName + '您好，有什么可以帮到你的吗？' : '您好，有什么可以帮到你的吗？';
+                    
+                    // 显示欢迎消息
+                    var welcomeMsg = document.createElement('div');
+                    welcomeMsg.style.cssText = 'align-self:flex-start;background:#fff;color:#374151;border:1px solid #e5e7eb;max-width:85%;padding:14px 18px;border-radius:16px;font-size:14px;line-height:1.7;word-break:break-word;box-shadow:0 2px 4px rgba(0,0,0,0.05);';
+                    welcomeMsg.textContent = welcomeText;
+                    container.appendChild(welcomeMsg);
+                    
+                    // 设置提示
+                    var hint = createHint('您可以选择考试和班级后提问');
+                    container.appendChild(hint);
+                    
+                    lastChatPage = currentPage; // 更新页面记录
+                    return;
+                }
+                
+                // 学生端：在这些页面不自动生成分析：events, total-table, attendance, homework-data
+                var noAutoAnalysisPages = ['/events', '/total-table', '/attendance', '/homework-data'];
+                if (noAutoAnalysisPages.includes(currentPage)) {
+                    // 不自动生成分析，显示提示
+                    var hint = createHint('有什么我可以帮助您的吗？');
+                    container.appendChild(hint);
+                    lastChatPage = currentPage;
+                    return;
+                }
+                
+                // 在 detail-analysis 页面检查学生端是否已选择
+                if (currentPage === '/detail-analysis' && userRole === 'student') {
+                    var hasSelection = window.currentStudentId;
                     if (!hasSelection) {
                         var hintDiv = document.createElement('div');
                         hintDiv.style.cssText = 'align-self:center;background:#fef3c7;color:#92400e;font-size:14px;padding:10px 16px;border-radius:12px;max-width:80%;text-align:center;';
                         hintDiv.textContent = '正在加载您的数据，请稍候...';
                         container.appendChild(hintDiv);
-                        return; // 不进行初始分析
+                        lastChatPage = currentPage;
+                        return;
                     }
                 }
+                
+                // 学生端自动分析
+                if (userRole === 'student') {
+                    doInitialAnalysis();
+                }
+                
+                lastChatPage = currentPage; // 更新页面记录
             }
-            
-            doInitialAnalysis();
+        } else {
+            // 同页面内打开，不重置对话，只滚动到底部
+            scrollToBottom();
         }
     }
 
