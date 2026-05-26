@@ -129,6 +129,10 @@ function processNextTask() {
 // 运行任务
 function run(data) {
     return new Promise((resolve, reject) => {
+        // 队列保护：防止内存无限增长
+        if (taskQueue.length > 20) {
+            return reject(new Error('系统繁忙，请稍后再试'));
+        }
         const task = {
             data,
             callback: (err, result) => {

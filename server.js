@@ -3,12 +3,81 @@ const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const v8 = require('v8');
 const { initDatabase, database } = require('./database-mysql');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { createWebSocketServer, getSessionCount, broadcastToClass, kickUserSessions, kickSocketsForSession, CLASS_MAX_SESSIONS, TEACHER_MAX_SESSIONS } = require('./ws-server');
 const workerPool = require('./worker-pool');
 const http = require('http');
+
+// ===== 全局错误处理：防止EPIPE等错误导致进程崩溃 =====
+process.on('uncaughtException', (err) => {
+    if (err.code === 'EPIPE' || err.code === 'ECONNRESET') {
+        console.warn('[安全] 客户端提前断开连接，已忽略错误:', err.message);
+    } else {
+        console.error('[致命错误] 未捕获的异常:', err);
+        console.error(err.stack);
+        // 非EPIPE错误可以选择继续运行或重启，根据情况决定
+        // process.exit(1); // 如果是致命错误才退出
+    }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.warn('[警告] 未处理的Promise拒绝:', reason);
+    // 不要让进程崩溃
+});
+
+// ===== 安全发送文件函数：防止客户端断开导致EPIPE =====
+function safeSendBuffer(req, res, buffer, filename) {
+    return new Promise((resolve, reject) => {
+        // 检查客户端是否还连接
+        if (req.socket.destroyed) {
+            console.warn('[安全] 客户端已断开，取消发送:', req.path);
+            resolve(false);
+            return;
+        }
+
+        // 设置正确的响应头
+        res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(filename));
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Transfer-Encoding', 'chunked');
+        
+        let sent = false;
+        
+        // 监听响应错误
+        res.on('error', (err) => {
+            if (err.code === 'EPIPE' || err.code === 'ECONNRESET') {
+                console.warn('[安全] 客户端在下载过程中断开:', filename);
+            } else {
+                console.error('[响应错误]', filename, ':', err);
+            }
+            if (!sent) {
+                sent = true;
+                resolve(false);
+            }
+        });
+
+        // 监听socket错误
+        req.socket.on('error', (err) => {
+            if (err.code === 'EPIPE' || err.code === 'ECONNRESET') {
+                console.warn('[安全] Socket错误，客户端断开:', filename);
+            }
+        });
+
+        // 发送数据
+        try {
+            res.send(buffer);
+            sent = true;
+            resolve(true);
+        } catch (err) {
+            if (!sent) {
+                sent = true;
+                reject(err);
+            }
+        }
+    });
+}
 
 const INDICATOR_TREE = [
     { l0: '守礼明规', l1: '品德修养', l2: '政治态度', point: '参加党课学习班', score: '+10' },
@@ -240,34 +309,54 @@ function clearFailedLogin(req) {
     loginAttempts.delete(ip);
 }
 
-// ===== 图形验证码系统 =====
+// ===== 滑动验证码系统 =====
 const captchaStore = new Map(); // token -> { answer, expires }
 const CAPTCHA_EXPIRE_MS = 5 * 60 * 1000; // 5分钟过期
+const CHECK_FOLDER_PATH = path.join(__dirname, 'check');
+const SLIDE_TOLERANCE = 30; // 允许误差15像素
 
-function generateCaptcha() {
-    const a = Math.floor(Math.random() * 20) + 1;
-    const b = Math.floor(Math.random() * 20) + 1;
-    const ops = ['+', '-', '×'];
-    const op = ops[Math.floor(Math.random() * ops.length)];
-    let answer, text;
-    if (op === '+') { answer = a + b; text = a + ' + ' + b; }
-    else if (op === '-') { answer = Math.max(a, b) - Math.min(a, b); text = Math.max(a, b) + ' - ' + Math.min(a, b); }
-    else { answer = a * b; text = a + ' × ' + b; }
-
-    const token = crypto.randomBytes(16).toString('hex');
-    captchaStore.set(token, { answer, expires: Date.now() + CAPTCHA_EXPIRE_MS });
-
-    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="50">' +
-        '<rect width="160" height="50" fill="#f0f0f0" rx="4"/>' +
-        '<text x="80" y="32" text-anchor="middle" font-size="22" font-family="Arial" fill="#333" font-weight="bold">' + text + ' = ?</text>' +
-        '<line x1="10" y1="15" x2="150" y2="10" stroke="#ccc" stroke-width="1"/>' +
-        '<line x1="20" y1="40" x2="140" y2="35" stroke="#ccc" stroke-width="1"/>' +
-        '</svg>';
-
-    return { token, svg: 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64') };
+// 读取check文件夹中的图片
+function getCheckImages() {
+    try {
+        const files = fs.readdirSync(CHECK_FOLDER_PATH);
+        return files.filter(f => /\.(png|jpg|jpeg)$/i.test(f)).map(f => path.join(CHECK_FOLDER_PATH, f));
+    } catch (e) {
+        console.error('[验证码] 读取check文件夹失败:', e);
+        return [];
+    }
 }
 
-function verifyCaptcha(token, userAnswer) {
+const checkImages = getCheckImages();
+console.log('[验证码] 可用图片:', checkImages.length);
+
+function generateSlideCaptcha() {
+    if (checkImages.length === 0) {
+        throw new Error('没有可用的验证图片');
+    }
+    
+    const imagePath = checkImages[Math.floor(Math.random() * checkImages.length)];
+    const targetX = Math.floor(Math.random() * 200) + 50; // 滑块目标位置50-250
+    const targetY = Math.floor(Math.random() * 100) + 50; // Y坐标50-150
+    const shapeType = Math.floor(Math.random() * 4); // 4种不同形状
+    
+    const token = crypto.randomBytes(16).toString('hex');
+    captchaStore.set(token, { 
+        answer: targetX, 
+        expires: Date.now() + CAPTCHA_EXPIRE_MS,
+        y: targetY,
+        shapeType: shapeType
+    });
+    
+    return { 
+        token, 
+        imagePath, 
+        targetX, 
+        targetY,
+        shapeType: shapeType
+    };
+}
+
+function verifySlideCaptcha(token, userX) {
     const record = captchaStore.get(token);
     if (!record) return false;
     if (Date.now() > record.expires) {
@@ -275,7 +364,7 @@ function verifyCaptcha(token, userAnswer) {
         return false;
     }
     captchaStore.delete(token);
-    return parseInt(userAnswer) === record.answer;
+    return Math.abs(userX - record.answer) <= SLIDE_TOLERANCE;
 }
 
 // ===== 按账号跟踪登录失败次数 =====
@@ -319,6 +408,33 @@ const sessionMiddleware = session({
 });
 app.use(sessionMiddleware);
 app.use(enforceSessionIdle);
+
+// 定期清理 MemoryStore 中的过期 session，防止内存泄漏
+setInterval(() => {
+    const sessions = sessionMiddleware.store?.sessions;
+    if (!sessions) return;
+    const keys = Object.keys(sessions);
+    if (keys.length > 50) {
+        const now = Date.now();
+        const expireThreshold = now - 24 * 60 * 60 * 1000; // 无过期时间的 session 24 小时后清理
+        let cleaned = 0;
+        for (const sid of keys) {
+            try {
+                const sess = sessions[sid];
+                if (!sess) continue;
+                const data = JSON.parse(sess);
+                const expires = data.cookie?.expires ? new Date(data.cookie.expires).getTime() : 0;
+                const lastActivity = data.lastActivityAt || 0;
+                // 有过期时间且已过期的，或无过期时间且 24 小时无活动的
+                if ((expires && expires < now) || (!expires && lastActivity && lastActivity < expireThreshold)) {
+                    sessionMiddleware.store.destroy(sid);
+                    cleaned++;
+                }
+            } catch (e) {}
+        }
+        if (cleaned > 0) console.log(`[Session] 清理了 ${cleaned} 个过期 session，剩余 ${keys.length - cleaned} 个`);
+    }
+}, 5 * 60 * 1000); // 每5分钟清理一次
 
 // ===== 互踢检测中间件（班级账号允许多端登录） =====
 const excludePaths = new Set([
@@ -443,6 +559,9 @@ function validateIP(req, res, next) {
     return next();
 }
 
+// check文件夹静态访问
+app.use('/check', express.static(path.join(__dirname, 'check')));
+
 // 所有路由使用IP验证
 app.use(validateIP);
 
@@ -461,10 +580,32 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// 获取图形验证码
-app.get('/api/captcha/generate', (req, res) => {
-    const captcha = generateCaptcha();
-    res.json({ success: true, token: captcha.token, image: captcha.svg });
+// 获取滑动验证码
+app.get('/api/slide-captcha/generate', (req, res) => {
+    try {
+        const captcha = generateSlideCaptcha();
+        const imageName = path.basename(captcha.imagePath);
+        res.json({ 
+            success: true, 
+            token: captcha.token, 
+            imageUrl: '/check/' + imageName,
+            targetX: captcha.targetX,
+            targetY: captcha.targetY,
+            shapeType: captcha.shapeType
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, message: '生成验证码失败' });
+    }
+});
+
+// 验证滑动验证码
+app.post('/api/slide-captcha/verify', (req, res) => {
+    const { token, x } = req.body;
+    if (!token || x === undefined) {
+        return res.status(400).json({ success: false, message: '参数错误' });
+    }
+    const success = verifySlideCaptcha(token, x);
+    res.json({ success });
 });
 
 // 获取当前登录用户信息（不需要认证，未登录时返回 null）
@@ -476,9 +617,9 @@ app.get('/api/current-user', (req, res) => {
     }
 });
 
-// 登录API（带 WAF 防暴力破解 + 验证码 + 账户冻结）
+// 登录API（带 WAF 防暴力破解 + 账户冻结）
 app.post('/api/login', rateLimitLogin, async (req, res) => {
-    const { employee_id, password, captcha_token, captcha_answer, remember_me } = req.body;
+    const { employee_id, password, remember_me } = req.body;
 
     if (!employee_id || !password) {
         return res.status(400).json({ success: false, message: '请输入账号和密码' });
@@ -489,31 +630,6 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
         const acc = abnormalAccounts.get(employee_id);
         logEvent(`账号 ${acc.name}(${employee_id}) 异常，已被冻结`, req);
         return res.status(403).json({ success: false, message: '账户异常，请联系管理员' });
-    }
-
-    // 检查是否需要验证码（失败2次以上）
-    const failedCount = getAccountFailedCount(employee_id);
-    if (failedCount >= CAPTCHA_THRESHOLD) {
-        if (!captcha_token || !captcha_answer) {
-            const captcha = generateCaptcha();
-            return res.status(401).json({
-                success: false,
-                needCaptcha: true,
-                captchaToken: captcha.token,
-                captchaImage: captcha.svg,
-                message: '请输入图形验证码'
-            });
-        }
-        if (!verifyCaptcha(captcha_token, captcha_answer)) {
-            const captcha = generateCaptcha();
-            return res.status(401).json({
-                success: false,
-                needCaptcha: true,
-                captchaToken: captcha.token,
-                captchaImage: captcha.svg,
-                message: '验证码错误，请重新输入'
-            });
-        }
     }
 
     // 检测5位纯数字账号 → 班级角色
@@ -1545,10 +1661,8 @@ app.get('/api/substitute-dashboard/export', requireAuth, requireCourseManager, a
     })));
 
     const filename = `社团代课总表_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
     const buffer = await workbook.xlsx.writeBuffer();
-    res.send(Buffer.from(buffer));
+    await safeSendBuffer(req, res, Buffer.from(buffer), filename);
 });
 
 app.delete('/api/substitute-requests/:id', requireAuth, requireCourseManager, async (req, res) => {
@@ -2704,9 +2818,7 @@ app.post('/api/beauty-scores/export', requireAuth, async (req, res) => {
         if (result.success) {
             const buf = Buffer.from(result.buffer);
             const filename = '美丽学分总表_' + start_month + '_' + end_month + '.xlsx';
-            res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(filename));
-            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.send(buf);
+            await safeSendBuffer(req, res, buf, filename);
         } else {
             res.status(500).json({ success: false, message: result.message });
         }
@@ -3459,9 +3571,7 @@ app.post('/api/attendance/export', requireAuth, async (req, res) => {
         if (result.success) {
             const buf = Buffer.from(result.buffer);
             const filename = '考勤表_' + start_date + '_' + end_date + '.xlsx';
-            res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(filename));
-            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-            res.send(buf);
+            await safeSendBuffer(req, res, buf, filename);
         } else {
             res.status(500).json({ success: false, message: result.message });
         }
@@ -3650,6 +3760,13 @@ app.get('/api/ai/context', requireAuth, async (req, res) => {
             contextText = await buildStudentContext(user, page, selection);
         }
 
+        // 保护：prompt 上限 40KB，超过则截断
+        const MAX_PROMPT = 40000;
+        if (contextText.length > MAX_PROMPT) {
+            contextText = contextText.substring(0, MAX_PROMPT) + '\n\n[提示内容过长已截断，优先保留最关键的数据]';
+            console.warn(`[AI] Prompt 过长 (${contextText.length} 字符)，已截断至 ${MAX_PROMPT}`);
+        }
+
         res.json({ success: true, data: { role, page, context: contextText } });
     } catch (err) {
         console.error('AI上下文采集失败:', err);
@@ -3817,8 +3934,37 @@ async function buildCompactExamLines(classId) {
     });
 
     lines.push(`【考试列表】${exams.map(e => e.name).join(' → ')}`);
+    lines.push('');
+    lines.push('【重要说明】每次考试的满分不一样，**禁止直接对比总分数值的变化**！');
+    lines.push('【核心分析方式】必须优先使用**学生排名**进行对比分析，分析学生在班级中的位置上升或下降。');
+    lines.push('');
 
+    // 先获取所有考试的所有学生排名数据，用于生成"排名变化对比表"
+    const examRankingMap = {};
+    const allStudentNames = new Set();
     for (const exam of exams) {
+        const rankings = await database.all(`
+            SELECT s.name, s.student_id,
+                   ROUND(SUM(CAST(sc.total_score AS REAL)),1) as total
+            FROM scores sc JOIN students s ON sc.student_id=s.id
+            WHERE s.class_id=? AND sc.exam_id=?
+              AND sc.total_score NOT IN ('缺考','免修')
+              AND CAST(sc.total_score AS REAL)>0
+            GROUP BY s.id ORDER BY total DESC
+        `, [classId, exam.id]);
+        
+        examRankingMap[exam.id] = {
+            examName: exam.name,
+            rankings: rankings.map((r, idx) => ({ ...r, rank: idx + 1 }))
+        };
+        rankings.forEach(r => allStudentNames.add(r.name));
+    }
+
+    // 生成每一场考试的详细数据
+    for (const exam of exams) {
+        const examData = examRankingMap[exam.id];
+        const rankings = examData.rankings;
+        
         const stats = await database.get(`
             SELECT COUNT(*) as cnt, ROUND(AVG(total),1) as avg,
                    ROUND(MAX(total),1) as max, ROUND(MIN(total),1) as min
@@ -3832,30 +3978,59 @@ async function buildCompactExamLines(classId) {
 
         if (!stats || !stats.cnt) continue;
 
-        const subjectAvgs = await database.all(`
-            SELECT sc.subject, ROUND(AVG(CAST(sc.total_score AS REAL)),1) as avg
-            FROM scores sc JOIN students s ON sc.student_id=s.id
-            WHERE s.class_id=? AND sc.exam_id=?
-              AND sc.total_score NOT IN ('缺考','免修')
-              AND CAST(sc.total_score AS REAL)>0
-            GROUP BY sc.subject ORDER BY sc.subject
-        `, [classId, exam.id]);
-        const subjectParts = subjectAvgs.map(s => `${s.subject}均${s.avg}`).join(' ');
-
-        const rankings = await database.all(`
-            SELECT s.name, s.student_id,
-                   ROUND(SUM(CAST(sc.total_score AS REAL)),1) as total
-            FROM scores sc JOIN students s ON sc.student_id=s.id
-            WHERE s.class_id=? AND sc.exam_id=?
-              AND sc.total_score NOT IN ('缺考','免修')
-              AND CAST(sc.total_score AS REAL)>0
-            GROUP BY s.id ORDER BY total DESC
-        `, [classId, exam.id]);
-
-        const top3 = rankings.slice(0, 3).map((r, i) => `${i + 1}.${r.name}${r.total}`);
-        const bot3 = rankings.slice(-3).map((r, i) => `${rankings.length - 2 + i}.${r.name}${r.total}`);
-        lines.push(`${exam.name}: ${stats.cnt}人 总分均${stats.avg} 最高${stats.max} 最低${stats.min} | 各科班级均分: ${subjectParts} | 前三:${top3.join(' ')} | 末三:${bot3.join(' ')}`);
+        lines.push(`---【${exam.name}】---`);
+        lines.push(`参考${stats.cnt}人 | 总分均${stats.avg} | 最高${stats.max} | 最低${stats.min}`);
+        
+        const top3 = rankings.slice(0, 3).map((r) => `${r.rank}.${r.name}${r.total}`);
+        const bot3 = rankings.slice(-3).map((r) => `${r.rank}.${r.name}${r.total}`);
+        lines.push(`前三:${top3.join(' ')} | 末三:${bot3.join(' ')}`);
+        
+        // 显示所有学生排名（最多35人）
+        if (rankings.length <= 35) {
+            const allRankingParts = rankings.map(r => `${r.rank}.${r.name}${r.total}`);
+            lines.push(`完整排名: ${allRankingParts.join(' | ')}`);
+        }
+        lines.push('');
     }
+
+    // 生成"学生排名变化对比表"（如果有至少两场考试）
+    if (exams.length >= 2) {
+        lines.push('---【学生排名变化对比表】---');
+        lines.push('（只列出参加了最近两场考试的学生，用于对比排名升降）');
+        
+        // 取最近两场考试
+        const recent2 = exams.slice(-2);
+        const exam1 = recent2[0];
+        const exam2 = recent2[1];
+        const data1 = examRankingMap[exam1.id];
+        const data2 = examRankingMap[exam2.id];
+        
+        // 构建两场考试的学生排名映射
+        const nameToRank1 = {};
+        data1.rankings.forEach(r => nameToRank1[r.name] = r.rank);
+        const nameToRank2 = {};
+        data2.rankings.forEach(r => nameToRank2[r.name] = r.rank);
+        
+        // 列出同时参加两场考试的学生
+        const commonStudents = data2.rankings.filter(r => nameToRank1[r.name]);
+        const changeLines = [];
+        
+        for (const s of commonStudents) {
+            const rank1 = nameToRank1[s.name];
+            const rank2 = s.rank;
+            const delta = rank1 - rank2;
+            const arrow = delta > 0 ? '↑' : delta < 0 ? '↓' : '→';
+            const changeText = delta !== 0 ? `${arrow}${Math.abs(delta)}名` : '不变';
+            changeLines.push(`${s.name}: ${exam1.name}第${rank1}名 → ${exam2.name}第${rank2}名 (${changeText})`);
+        }
+        
+        changeLines.forEach(l => lines.push(l));
+        lines.push('');
+    }
+
+    lines.push('【禁止事项】');
+    lines.push('1. 禁止直接对比不同考试的总分值变化！');
+    lines.push('2. 必须优先使用排名变化来分析学生进步/退步！');
 
     return lines;
 }
@@ -4019,46 +4194,48 @@ async function buildDashboardContext(user, selection) {
             lines.push('');
         }
 
-        // 为每一场考试提供数据
+        // 为每一场考试提供摘要数据（非当前考试仅统计，当前考试提供详细学生数据+排名）
         for (let i = 0; i < sortedExams.length; i++) {
             const exam = sortedExams[i];
-            lines.push(`---【第${i + 1}场考试：${exam.name}】---`);
+            const isCurrent = (i === currentExamIndex);
 
-            const stats = await database.get(`
-                SELECT COUNT(*) as student_count,
-                       ROUND(AVG(total), 1) as avg_score,
-                       ROUND(MAX(total), 1) as max_score,
-                       ROUND(MIN(total), 1) as min_score
-                FROM (
-                    SELECT SUM(CAST(sc.total_score AS REAL)) as total
-                    FROM scores sc
-                    JOIN students s ON sc.student_id = s.id
-                    WHERE s.class_id = ? AND sc.exam_id = ?
-                      AND sc.total_score NOT IN ('缺考', '免修')
-                      AND CAST(sc.total_score AS REAL) > 0
-                    GROUP BY sc.student_id
-                ) as student_totals
+            // 获取学生总分列表并计算排名
+            const examStudentScores = await database.all(`
+                SELECT s.name, s.student_id,
+                       ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total_score
+                FROM scores sc
+                JOIN students s ON sc.student_id = s.id
+                WHERE s.class_id = ? AND sc.exam_id = ?
+                  AND sc.total_score NOT IN ('缺考', '免修')
+                  AND CAST(sc.total_score AS REAL) > 0
+                GROUP BY s.id
+                ORDER BY total_score DESC, s.student_id
             `, [classId, exam.id]);
 
-            if (stats && stats.student_count > 0) {
-                lines.push(`班级成绩统计：参考${stats.student_count}人，平均分${stats.avg_score}，最高${stats.max_score}，最低${stats.min_score}`);
+            if (examStudentScores && examStudentScores.length > 0) {
+                // 计算统计数据
+                const studentCount = examStudentScores.length;
+                const avgScore = examStudentScores.reduce((sum, s) => sum + s.total_score, 0) / studentCount;
+                const maxScore = examStudentScores[0].total_score;
+                const minScore = examStudentScores[studentCount - 1].total_score;
 
-                // 获取该考试的学生详细成绩（只有总分）
-                const examStudentScores = await database.all(`
-                    SELECT s.name, s.student_id,
-                           ROUND(SUM(CAST(sc.total_score AS REAL)), 1) as total_score
-                    FROM scores sc
-                    JOIN students s ON sc.student_id = s.id
-                    WHERE s.class_id = ? AND sc.exam_id = ?
-                      AND sc.total_score NOT IN ('缺考', '免修')
-                      AND CAST(sc.total_score AS REAL) > 0
-                    GROUP BY s.id
-                    ORDER BY s.student_id
-                `, [classId, exam.id]);
+                // 为每个学生添加排名
+                const rankedStudents = examStudentScores.map((s, idx) => ({
+                    ...s,
+                    rank: idx + 1
+                }));
 
-                if (examStudentScores.length > 0) {
-                    const studentParts = examStudentScores.map(s => `${s.name}总分${s.total_score}`);
-                    lines.push(`学生总分：${studentParts.join('，')}`);
+                lines.push(`---【第${i + 1}场：${exam.name}${isCurrent ? '（当前选择）' : ''}】参考${studentCount}人，均分${avgScore.toFixed(1)}，最高${maxScore}，最低${minScore}`);
+
+                // 仅对当前考试提供详细学生成绩+排名，其他考试仅统计
+                if (isCurrent) {
+                    const studentParts = rankedStudents.map(s => `${s.name}第${s.rank}名${s.total_score}分`);
+                    lines.push(`学生成绩（按排名）：${studentParts.join('，')}`);
+                } else {
+                    // 非当前考试，只保留前3名和末3名作为参考
+                    const top3 = rankedStudents.slice(0, 3).map(s => `${s.name}第${s.rank}名`);
+                    const bottom3 = rankedStudents.slice(-3).map(s => `${s.name}第${s.rank}名`);
+                    lines.push(`前3名：${top3.join('、')} | 末3名：${bottom3.join('、')}`);
                 }
             }
             lines.push('');
@@ -4081,8 +4258,10 @@ async function buildDashboardContext(user, selection) {
     if (sortedExams.length > 0) {
         lines.push(`你拥有：1个班级、${sortedExams.length}场考试的成绩数据。`);
         lines.push(`考试按时间顺序排列：${sortedExams.map((e, i) => `第${i+1}场${e.name}`).join('、')}`);
-        lines.push('每场考试的数据包括：班级平均分/最高分/最低分、学生总分。');
+        lines.push('当前选择的考试有学生详细排名和总分，其他考试只有班级统计和前3/末3名。');
         lines.push('注意：没有单科成绩数据，只分析总分。');
+        lines.push('【重要说明】每次考试的满分不一样，**禁止直接对比总分数值的变化**！');
+        lines.push('【核心分析方式】必须优先使用**学生排名**进行对比分析，分析学生在班级中的位置上升或下降。');
     } else {
         lines.push('你只有：1个班级的学生名单。没有考试成绩数据。');
     }
@@ -4091,11 +4270,13 @@ async function buildDashboardContext(user, selection) {
     lines.push('【回答要求】');
     if (sortedExams.length > 0) {
         lines.push('- 只分析总分情况，不要提到任何单科；');
+        lines.push('- 必须优先使用排名进行分析，不要对比总分数值的变化；');
+        lines.push('- 可以提及均分、最高/最低分作为背景参考，但核心分析必须围绕排名展开；');
         lines.push('- 用户说"这学期""当前考试"或类似：请使用当前选择的那一场考试的数据；');
         lines.push('- 用户说"跟上次考试""跟上一次对比"或类似：请使用当前选择的考试和它的前一场考试进行对比；');
         lines.push('- 用户说"跟下一次对比"或类似：请使用当前选择的考试和它的后一场考试进行对比；');
         lines.push('- 用户没有指定考试：默认使用当前选择的那一场考试的数据；');
-        lines.push('- 提到学生时，只能用上面列出的学生姓名和成绩；');
+        lines.push('- 提到学生时，只能用上面列出的学生姓名和成绩/排名；');
         lines.push('- 如果数据不足以得出某个结论，就说"当前数据不足以判断"，不要编造；');
         lines.push('- 回答控制在150-300字，简洁专业。');
     } else {
@@ -5545,6 +5726,19 @@ async function startServer() {
         }
     }
     
+    // ===== 通用错误处理中间件：捕获socket错误 =====
+    app.use((req, res, next) => {
+        // 给每个请求的socket添加错误处理
+        req.socket.on('error', (err) => {
+            if (err.code === 'EPIPE' || err.code === 'ECONNRESET') {
+                console.warn('[安全] 客户端提前断开连接:', req.path);
+            } else {
+                console.error('[Socket错误]', req.path, ':', err);
+            }
+        });
+        next();
+    });
+
     // ===== WebSocket + HTTP 启动 =====
     const { server, io } = createWebSocketServer(app, sessionMiddleware, {
         onSocketActivity(socket) {
@@ -5556,6 +5750,11 @@ async function startServer() {
             });
         }
     });
+    
+    // 设置服务器超时时间为5分钟（300000毫秒），避免导出大文件时超时
+    server.setTimeout(300000);
+    console.log('[配置] 服务器超时时间已设置为5分钟');
+    
     app.set('io', io);
 
     app.get('/api/worker-pool-stats', (req, res) => {
@@ -5583,8 +5782,17 @@ async function startServer() {
         console.log('  WS:    ws://' + LOCAL_IP + ':' + PORT);
         console.log('  班级账号最大连接数: ' + CLASS_MAX_SESSIONS);
         console.log('  会话空闲超时: ' + SESSION_IDLE_MS / 60000 + ' 分钟无操作需重新登录');
+        console.log('  内存限制: ' + (v8.getHeapStatistics().heap_size_limit / 1048576).toFixed(0) + 'MB');
         console.log('=========================================');
         console.log('默认管理员: admin / admin123');
+        
+        // 每10分钟打印一次内存使用情况
+        setInterval(() => {
+            const used = process.memoryUsage();
+            const sessions = sessionMiddleware.store?.sessions;
+            const sessionCount = sessions ? Object.keys(sessions).length : 0;
+            console.log(`[内存] 堆:${(used.heapUsed/1048576).toFixed(1)}MB/${(used.heapTotal/1048576).toFixed(1)}MB | RSS:${(used.rss/1048576).toFixed(1)}MB | 外部:${(used.external/1048576).toFixed(1)}MB | Session:${sessionCount}`);
+        }, 10 * 60 * 1000);
     });
 }
 

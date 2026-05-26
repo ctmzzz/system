@@ -921,6 +921,178 @@
             .login-module { flex: 0 0 100%; }
             .system-name { font-size: 19px; }
         }
+
+        /* 滑动验证弹窗 */
+        .slide-captcha-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .slide-captcha-modal.active {
+            display: flex;
+        }
+
+        .slide-captcha-box {
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(2, 6, 23, 0.98));
+            border-radius: 16px;
+            padding: 24px;
+            width: 360px;
+            max-width: 90%;
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .slide-captcha-title {
+            color: #e2e8f0;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .slide-captcha-image-container {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            background: rgba(30, 41, 59, 0.5);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        .slide-captcha-bg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .slide-captcha-block {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+            pointer-events: none;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        #slideCaptchaBlockCanvas {
+            display: block;
+        }
+
+        .slide-captcha-slider-container {
+            position: relative;
+            height: 44px;
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 8px;
+            border: 1px solid rgba(71, 85, 105, 0.5);
+            margin-bottom: 16px;
+        }
+
+        .slide-captcha-track {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(148, 163, 184, 0.7);
+            font-size: 14px;
+        }
+
+        .slide-captcha-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            background: linear-gradient(90deg, rgba(34, 211, 238, 0.2), rgba(56, 189, 248, 0.3));
+            border-radius: 8px;
+        }
+
+        .slide-captcha-btn {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #22d1ee, #3b82f6);
+            border-radius: 6px;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            transition: transform 0.1s;
+        }
+
+        .slide-captcha-btn:active {
+            cursor: grabbing;
+        }
+
+        .slide-captcha-btn svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .slide-captcha-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .slide-captcha-btn-refresh,
+        .slide-captcha-btn-close {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .slide-captcha-btn-refresh {
+            background: rgba(56, 189, 248, 0.2);
+            color: #22d1ee;
+            border: 1px solid rgba(34, 211, 238, 0.3);
+        }
+
+        .slide-captcha-btn-refresh:hover {
+            background: rgba(56, 189, 248, 0.3);
+        }
+
+        .slide-captcha-btn-close {
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }
+
+        .slide-captcha-btn-close:hover {
+            background: rgba(248, 113, 113, 0.3);
+        }
+
+        .slide-captcha-error {
+            color: #f87171;
+            text-align: center;
+            font-size: 13px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        .slide-captcha-error.show {
+            display: block;
+        }
     </style>
     <script>
         (function () {
@@ -1017,16 +1189,7 @@
                         </div>
                     </div>
                     
-                    <div class="input-cluster" id="captchaGroup">
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <img id="captchaImage" src="" alt="验证码" title="点击刷新验证码">
-                            <div class="input-field" style="flex:1;">
-                                <input type="text" id="captcha" placeholder="请输入验证码" autocomplete="off" maxlength="4">
-                                <svg class="field-icon" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-                            </div>
-                        </div>
-                    </div>
-                    
+
                     <button type="button" id="loginBtn" class="auth-button">登 录</button>
                 </div>
             </div>
@@ -1225,120 +1388,453 @@
             document.body.appendChild(p);
         }
 
-        const employeeIdInput = document.getElementById('employee_id');
-        const passwordInput = document.getElementById('password');
-        const loginBtn = document.getElementById('loginBtn');
-        const errorMessage = document.getElementById('errorMessage');
-        const captchaGroup = document.getElementById('captchaGroup');
-        const captchaImage = document.getElementById('captchaImage');
-        const captchaInput = document.getElementById('captcha');
+        document.addEventListener('DOMContentLoaded', function() {
+            const employeeIdInput = document.getElementById('employee_id');
+            const passwordInput = document.getElementById('password');
+            const loginBtn = document.getElementById('loginBtn');
+            const errorMessage = document.getElementById('errorMessage');
 
-        let captchaToken = null;
+            // 滑动验证相关
+            const slideCaptchaModal = document.getElementById('slideCaptchaModal');
+            const slideCaptchaCanvas = document.getElementById('slideCaptchaCanvas');
+            const slideCaptchaBlock = document.getElementById('slideCaptchaBlock');
+            const slideCaptchaBlockCanvas = document.getElementById('slideCaptchaBlockCanvas');
+            const slideCaptchaBtn = document.getElementById('slideCaptchaBtn');
+            const slideCaptchaProgress = document.getElementById('slideCaptchaProgress');
+            const slideCaptchaRefresh = document.getElementById('slideCaptchaRefresh');
+            const slideCaptchaClose = document.getElementById('slideCaptchaClose');
+            const slideCaptchaError = document.getElementById('slideCaptchaError');
 
-        function showError(message) {
-            errorMessage.textContent = message;
-            errorMessage.classList.add('visible');
-            setTimeout(() => errorMessage.classList.remove('visible'), 3500);
-        }
+            let slideCaptchaData = null;
+            let isDragging = false;
+            let startX = 0;
+            let currentX = 0;
+            let pendingLoginData = null;
+            let captchaImage = null;
+            const BLOCK_SIZE = 50;
 
-        function showCaptcha(token, image) {
-            captchaToken = token;
-            captchaImage.src = image;
-            captchaGroup.style.display = 'block';
-            captchaInput.value = '';
-            captchaInput.focus();
-        }
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorMessage.classList.add('visible');
+                setTimeout(() => errorMessage.classList.remove('visible'), 3500);
+            }
 
-        function hideCaptcha() {
-            captchaGroup.style.display = 'none';
-            captchaToken = null;
-            captchaInput.value = '';
-        }
+            function showSlideCaptchaError(message) {
+                slideCaptchaError.textContent = message;
+                slideCaptchaError.classList.add('show');
+                setTimeout(() => slideCaptchaError.classList.remove('show'), 2000);
+            }
 
-        captchaImage.addEventListener('click', function() {
-            fetch('/api/captcha/generate')
-                .then(r => r.json())
-                .then(data => {
+            async function generateSlideCaptcha() {
+                try {
+                    const res = await fetch('/api/slide-captcha/generate');
+                    const data = await res.json();
                     if (data.success) {
-                        captchaToken = data.token;
-                        captchaImage.src = data.image;
-                    }
-                });
-        });
-
-        function login() {
-            var employee_id = employeeIdInput.value.trim();
-            var password = passwordInput.value;
-
-            if (!employee_id || !password) {
-                showError('请输入账号和密码');
-                return;
-            }
-
-            loginBtn.disabled = true;
-            loginBtn.textContent = '登录中...';
-
-            var body = { employee_id: employee_id, password: password };
-            if (captchaToken) {
-                body.captcha_token = captchaToken;
-                body.captcha_answer = captchaInput.value.trim();
-            }
-
-            fetch('/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    hideCaptcha();
-                    if (data.redirect) {
-                        window.location.replace(data.redirect);
+                        console.log('获取验证码数据:', data);
+                        console.log('形状类型:', data.shapeType);
+                        slideCaptchaData = data;
+                        captchaImage = new Image();
+                        captchaImage.crossOrigin = 'anonymous';
+                        captchaImage.onload = function() {
+                            drawCaptcha();
+                            resetSlider();
+                        };
+                        captchaImage.onerror = function() {
+                            showSlideCaptchaError('图片加载失败');
+                        };
+                        captchaImage.src = data.imageUrl;
                     } else {
-                        fetch('/api/auth/check')
-                            .then(r => r.json())
-                            .then(authData => {
-                                if (authData.user && authData.user.role === 'admin') {
-                                    window.location.replace('/admin');
-                                } else if (authData.user && authData.user.role === 'course') {
-                                    window.location.replace('/course-hours');
-                                } else if (authData.user && authData.user.role === 'class') {
-                                    window.location.replace('/total-table');
-                                } else {
-                                    window.location.replace('/dashboard');
-                                }
-                            });
+                        showSlideCaptchaError('生成验证码失败');
                     }
-                } else if (data.needCaptcha) {
-                    showCaptcha(data.captchaToken, data.captchaImage);
-                    showError(data.message || '请输入验证码');
-                    loginBtn.disabled = false;
-                    loginBtn.textContent = '登 录';
+                } catch (e) {
+                    console.error('获取验证码错误:', e);
+                    showSlideCaptchaError('网络错误');
+                }
+            }
+
+            function drawCaptcha() {
+                if (!captchaImage || !slideCaptchaData) return;
+
+                const containerWidth = slideCaptchaCanvas.parentElement.clientWidth;
+                const containerHeight = 200;
+                
+                // 设置canvas尺寸
+                slideCaptchaCanvas.width = containerWidth;
+                slideCaptchaCanvas.height = containerHeight;
+                slideCaptchaBlockCanvas.width = BLOCK_SIZE;
+                slideCaptchaBlockCanvas.height = BLOCK_SIZE;
+
+                const ctx = slideCaptchaCanvas.getContext('2d');
+                const blockCtx = slideCaptchaBlockCanvas.getContext('2d');
+
+                // 计算图片缩放比例，保持宽高比填满容器
+                const imgRatio = captchaImage.width / captchaImage.height;
+                const containerRatio = containerWidth / containerHeight;
+                let drawWidth, drawHeight, drawX, drawY;
+
+                if (imgRatio > containerRatio) {
+                    drawHeight = containerHeight;
+                    drawWidth = drawHeight * imgRatio;
+                    drawX = (containerWidth - drawWidth) / 2;
+                    drawY = 0;
                 } else {
-                    showError(data.message || '登录失败');
+                    drawWidth = containerWidth;
+                    drawHeight = drawWidth / imgRatio;
+                    drawX = 0;
+                    drawY = (containerHeight - drawHeight) / 2;
+                }
+
+                // 绘制背景图
+                ctx.drawImage(captchaImage, drawX, drawY, drawWidth, drawHeight);
+
+                // 计算目标位置在画布上的实际坐标
+                const scaleX = drawWidth / captchaImage.width;
+                const scaleY = drawHeight / captchaImage.height;
+                const actualTargetX = drawX + slideCaptchaData.targetX * scaleX;
+                const actualTargetY = drawY + slideCaptchaData.targetY * scaleY;
+
+                // 在背景图上挖缺口（绘制目标位置的白色镂空效果）
+                ctx.save();
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                drawPuzzlePiece(ctx, actualTargetX, actualTargetY);
+                ctx.restore();
+
+                // 绘制目标位置的边框
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.lineWidth = 2;
+                drawPuzzlePiece(ctx, actualTargetX, actualTargetY, true);
+                ctx.restore();
+
+                // 绘制滑块图片
+                blockCtx.clearRect(0, 0, BLOCK_SIZE, BLOCK_SIZE);
+                blockCtx.save();
+                blockCtx.beginPath();
+                drawPuzzlePiecePath(blockCtx, 0, 0);
+                blockCtx.closePath();
+                blockCtx.clip();
+                // 计算滑块图片在原图中的位置
+                const srcX = slideCaptchaData.targetX;
+                const srcY = slideCaptchaData.targetY;
+                const srcW = BLOCK_SIZE / scaleX;
+                const srcH = BLOCK_SIZE / scaleY;
+                blockCtx.drawImage(
+                    captchaImage,
+                    srcX, srcY, srcW, srcH,
+                    0, 0, BLOCK_SIZE, BLOCK_SIZE
+                );
+                blockCtx.restore();
+
+                // 绘制滑块边框
+                blockCtx.save();
+                blockCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                blockCtx.lineWidth = 2;
+                drawPuzzlePiece(blockCtx, 0, 0, true);
+                blockCtx.restore();
+
+                // 设置滑块的初始位置
+                slideCaptchaBlock.style.top = actualTargetY + 'px';
+            }
+
+            // 绘制拼图块形状
+            function drawPuzzlePiece(ctx, x, y, isStroke = false) {
+                drawPuzzlePiecePath(ctx, x, y);
+                if (isStroke) {
+                    ctx.stroke();
+                } else {
+                    ctx.fill();
+                }
+            }
+
+            function drawPuzzlePiecePath(ctx, x, y) {
+                const r = 12;
+                const l = BLOCK_SIZE;
+                const shapeType = slideCaptchaData ? slideCaptchaData.shapeType : 0;
+                
+                // 清除路径
+                ctx.beginPath();
+                
+                switch (shapeType) {
+                    case 0:
+                        drawPuzzleShape1(ctx, x, y, l, r);
+                        break;
+                    case 1:
+                        drawPuzzleShape2(ctx, x, y, l, r);
+                        break;
+                    case 2:
+                        drawPuzzleShape3(ctx, x, y, l, r);
+                        break;
+                    case 3:
+                        drawPuzzleShape4(ctx, x, y, l, r);
+                        break;
+                    default:
+                        drawPuzzleShape1(ctx, x, y, l, r);
+                }
+                
+                ctx.closePath();
+            }
+
+            // 形状1：经典拼图（右边凸起，下边凹陷）
+            function drawPuzzleShape1(ctx, x, y, l, r) {
+                ctx.moveTo(x, y);
+                ctx.lineTo(x, y + l * 0.35);
+                ctx.arc(x + r, y + l * 0.5, r, -Math.PI / 2, Math.PI / 2, false);
+                ctx.lineTo(x, y + l);
+                ctx.lineTo(x + l, y + l);
+                ctx.lineTo(x + l, y + l * 0.65);
+                ctx.arc(x + l - r, y + l * 0.5, r, Math.PI / 2, -Math.PI / 2, true);
+                ctx.lineTo(x + l, y);
+                ctx.lineTo(x, y);
+            }
+
+            // 形状2：双凸起拼图（左边和上边凸起）
+            function drawPuzzleShape2(ctx, x, y, l, r) {
+                ctx.moveTo(x + l * 0.35, y);
+                ctx.arc(x + l * 0.5, y + r, r, Math.PI, 0, false);
+                ctx.lineTo(x + l, y);
+                ctx.lineTo(x + l, y + l * 0.35);
+                ctx.arc(x + l - r, y + l * 0.5, r, -Math.PI / 2, Math.PI / 2, true);
+                ctx.lineTo(x + l, y + l);
+                ctx.lineTo(x, y + l);
+                ctx.lineTo(x, y + l * 0.65);
+                ctx.arc(x + r, y + l * 0.5, r, Math.PI / 2, -Math.PI / 2, false);
+                ctx.lineTo(x, y);
+                ctx.lineTo(x + l * 0.35, y);
+            }
+
+            // 形状3：四圆角拼图
+            function drawPuzzleShape3(ctx, x, y, l, r) {
+                ctx.moveTo(x + r, y);
+                ctx.arc(x + l - r, y + r, r, -Math.PI / 2, 0, false);
+                ctx.lineTo(x + l, y + l - r);
+                ctx.arc(x + l - r, y + l - r, r, 0, Math.PI / 2, false);
+                ctx.lineTo(x + r, y + l);
+                ctx.arc(x + r, y + l - r, r, Math.PI / 2, Math.PI, false);
+                ctx.lineTo(x, y + r);
+                ctx.arc(x + r, y + r, r, Math.PI, -Math.PI / 2, false);
+            }
+
+            // 形状4：方形带凹陷拼图
+            function drawPuzzleShape4(ctx, x, y, l, r) {
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + l * 0.35, y);
+                ctx.lineTo(x + l * 0.35, y + r);
+                ctx.lineTo(x + l * 0.5, y + r);
+                ctx.lineTo(x + l * 0.5, y);
+                ctx.lineTo(x + l * 0.65, y);
+                ctx.lineTo(x + l, y);
+                ctx.lineTo(x + l, y + l * 0.35);
+                ctx.lineTo(x + l - r, y + l * 0.35);
+                ctx.lineTo(x + l - r, y + l * 0.5);
+                ctx.lineTo(x + l, y + l * 0.5);
+                ctx.lineTo(x + l, y + l * 0.65);
+                ctx.lineTo(x + l, y + l);
+                ctx.lineTo(x, y + l);
+                ctx.lineTo(x, y);
+            }
+
+            function resetSlider() {
+                currentX = 0;
+                slideCaptchaBtn.style.left = '2px';
+                slideCaptchaProgress.style.width = '0';
+                slideCaptchaBlock.style.left = '0px';
+                slideCaptchaBlock.style.display = 'block';
+            }
+
+            function openSlideCaptcha() {
+                slideCaptchaModal.classList.add('active');
+                generateSlideCaptcha();
+            }
+
+            function closeSlideCaptcha() {
+                slideCaptchaModal.classList.remove('active');
+                loginBtn.disabled = false;
+                loginBtn.textContent = '登 录';
+            }
+
+            function startDrag(e) {
+                isDragging = true;
+                startX = e.type === 'mousedown' ? e.clientX : e.touches[0].clientX;
+                slideCaptchaBtn.style.transition = 'none';
+                slideCaptchaProgress.style.transition = 'none';
+                slideCaptchaBlock.style.transition = 'none';
+            }
+
+            function doDrag(e) {
+                if (!isDragging) return;
+                const clientX = e.type === 'mousemove' ? e.clientX : e.touches[0].clientX;
+                let moveX = clientX - startX;
+                const maxMove = slideCaptchaBtn.parentElement.clientWidth - 44;
+                
+                if (moveX < 0) moveX = 0;
+                if (moveX > maxMove) moveX = maxMove;
+                
+                currentX = moveX;
+                slideCaptchaBtn.style.left = (moveX + 2) + 'px';
+                slideCaptchaProgress.style.width = moveX + 'px';
+                slideCaptchaBlock.style.left = moveX + 'px';
+            }
+
+            async function endDrag(e) {
+                if (!isDragging) return;
+                isDragging = false;
+                
+                slideCaptchaBtn.style.transition = 'transform 0.2s';
+                slideCaptchaProgress.style.transition = 'width 0.2s';
+                slideCaptchaBlock.style.transition = 'left 0.2s';
+                
+                // 计算当前滑动距离对应的实际图片坐标
+                const containerWidth = slideCaptchaCanvas.parentElement.clientWidth;
+                const containerHeight = 200;
+                const imgRatio = captchaImage.width / captchaImage.height;
+                const containerRatio = containerWidth / containerHeight;
+                let drawWidth, drawHeight;
+                
+                if (imgRatio > containerRatio) {
+                    drawHeight = containerHeight;
+                    drawWidth = drawHeight * imgRatio;
+                } else {
+                    drawWidth = containerWidth;
+                    drawHeight = drawWidth / imgRatio;
+                }
+                
+                const scaleX = drawWidth / captchaImage.width;
+                const userXInImage = currentX / scaleX;
+                
+                try {
+                    const res = await fetch('/api/slide-captcha/verify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            token: slideCaptchaData.token,
+                            x: userXInImage
+                        })
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        // 验证成功，滑块固定到正确位置显示成功效果
+                        const actualTargetX = (containerRatio > imgRatio ? 0 : (containerWidth - drawWidth) / 2) + slideCaptchaData.targetX * scaleX;
+                        slideCaptchaBlock.style.transition = 'left 0.3s ease';
+                        slideCaptchaBlock.style.left = actualTargetX + 'px';
+                        
+                        // 绿色成功效果
+                        slideCaptchaBlock.style.boxShadow = '0 0 10px rgba(34, 211, 238, 0.8), 0 2px 10px rgba(0, 0, 0, 0.4)';
+                        
+                        setTimeout(() => {
+                            closeSlideCaptcha();
+                            executeLogin();
+                        }, 500);
+                    } else {
+                        // 验证失败，重置
+                        showSlideCaptchaError('验证失败，请重试');
+                        setTimeout(() => {
+                            generateSlideCaptcha();
+                        }, 500);
+                    }
+                } catch (e) {
+                    showSlideCaptchaError('网络错误');
+                    setTimeout(() => {
+                        generateSlideCaptcha();
+                    }, 500);
+                }
+            }
+
+            // 绑定滑动事件
+            if (slideCaptchaBtn) {
+                slideCaptchaBtn.addEventListener('mousedown', startDrag);
+                slideCaptchaBtn.addEventListener('touchstart', startDrag);
+            }
+            document.addEventListener('mousemove', doDrag);
+            document.addEventListener('touchmove', doDrag);
+            document.addEventListener('mouseup', endDrag);
+            document.addEventListener('touchend', endDrag);
+
+            // 刷新和关闭按钮
+            if (slideCaptchaRefresh) {
+                slideCaptchaRefresh.addEventListener('click', generateSlideCaptcha);
+            }
+            if (slideCaptchaClose) {
+                slideCaptchaClose.addEventListener('click', closeSlideCaptcha);
+            }
+
+            function login() {
+                const employee_id = employeeIdInput.value.trim();
+                const password = passwordInput.value;
+
+                if (!employee_id || !password) {
+                    showError('请输入账号和密码');
+                    return;
+                }
+
+                loginBtn.disabled = true;
+                loginBtn.textContent = '验证中...';
+                
+                // 保存登录数据，验证成功后使用
+                pendingLoginData = { employee_id, password };
+                
+                // 打开滑动验证
+                openSlideCaptcha();
+            }
+
+            async function executeLogin() {
+                if (!pendingLoginData) return;
+                
+                loginBtn.disabled = true;
+                loginBtn.textContent = '登录中...';
+
+                try {
+                    const res = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(pendingLoginData)
+                    });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        pendingLoginData = null;
+                        if (data.redirect) {
+                            window.location.replace(data.redirect);
+                        } else {
+                            const authRes = await fetch('/api/auth/check');
+                            const authData = await authRes.json();
+                            if (authData.user && authData.user.role === 'admin') {
+                                window.location.replace('/admin');
+                            } else if (authData.user && authData.user.role === 'course') {
+                                window.location.replace('/course-hours');
+                            } else if (authData.user && authData.user.role === 'class') {
+                                window.location.replace('/total-table');
+                            } else {
+                                window.location.replace('/dashboard');
+                            }
+                        }
+                    } else {
+                        showError(data.message || '登录失败');
+                        loginBtn.disabled = false;
+                        loginBtn.textContent = '登 录';
+                    }
+                } catch (err) {
+                    showError('网络错误，请稍后重试');
                     loginBtn.disabled = false;
                     loginBtn.textContent = '登 录';
                 }
-            })
-            .catch(err => {
-                showError('网络错误，请稍后重试');
-                loginBtn.disabled = false;
-                loginBtn.textContent = '登 录';
-            });
-        }
+            }
 
-        loginBtn.addEventListener('click', login);
+            if (loginBtn) {
+                loginBtn.addEventListener('click', login);
+            }
 
-        passwordInput.addEventListener('keypress', e => {
-            if (e.key === 'Enter') login();
+            if (passwordInput) {
+                passwordInput.addEventListener('keypress', e => {
+                    if (e.key === 'Enter') login();
+                });
+            }
+
+            if (employeeIdInput) {
+                employeeIdInput.focus();
+            }
         });
-
-        captchaInput.addEventListener('keypress', e => {
-            if (e.key === 'Enter') login();
-        });
-
-        employeeIdInput.focus();
 
         (function() {
             const canvas = document.getElementById('earth3d');
@@ -1596,5 +2092,32 @@
     </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/ai-chat.js"></script>
+
+    <!-- 滑动验证弹窗 -->
+    <div id="slideCaptchaModal" class="slide-captcha-modal">
+        <div class="slide-captcha-box">
+            <div class="slide-captcha-title">请完成安全验证</div>
+            <div class="slide-captcha-image-container">
+                <canvas id="slideCaptchaCanvas" class="slide-captcha-bg"></canvas>
+                <div id="slideCaptchaBlock" class="slide-captcha-block">
+                    <canvas id="slideCaptchaBlockCanvas"></canvas>
+                </div>
+            </div>
+            <div class="slide-captcha-slider-container">
+                <div class="slide-captcha-track">向右拖动滑块完成拼图</div>
+                <div id="slideCaptchaProgress" class="slide-captcha-progress"></div>
+                <div id="slideCaptchaBtn" class="slide-captcha-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18l6-6-6-6"/>
+                    </svg>
+                </div>
+            </div>
+            <div class="slide-captcha-actions">
+                <button id="slideCaptchaRefresh" class="slide-captcha-btn-refresh">换一张</button>
+                <button id="slideCaptchaClose" class="slide-captcha-btn-close">取消</button>
+            </div>
+            <div id="slideCaptchaError" class="slide-captcha-error"></div>
+        </div>
+    </div>
 </body>
 </html>
