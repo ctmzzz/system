@@ -27,9 +27,15 @@ app.use(express.static(path.join(__dirname, 'monitor-public')));
 
 const PORT = 3002;
 const LOGS_DIR = path.join(__dirname, 'logs');
+const BACKUP_DIR = path.join(__dirname, 'database');
 const MAX_LOGS = 500;
 const RESOURCE_INTERVAL = 3000;
 const LOG_POLL_INTERVAL = 2000;
+
+// 确保备份目录存在
+if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
 
 // 格式化时间 YYYY-MM-DD HH:mm:ss
 function formatTime(date) {
@@ -57,11 +63,19 @@ function getLocalIP() {
 }
 const LOCAL_IP = getLocalIP();
 
+// 从主服务器读取数据库配置
+const mainDbConfig = {
+    host: 'localhost',
+    port: 3306,
+    connected: false
+};
+
+// monitor 自己的数据库配置（用于登录）
 const DB_CONFIG = {
-    host: '192.168.3.6',
+    host: 'localhost',
     port: 3306,
     user: 'root',
-    password: 'Saodiseng1',
+    password: '123456',
     database: 'score_analysis',
     waitForConnections: true,
     connectionLimit: 5,
@@ -175,6 +189,67 @@ app.post('/api/server-stop', (req, res) => {
     res.json({ success: true, message: '主服务器已停止' });
 });
 
+// 手动备份数据库
+app.post('/api/backup', async (req, res) => {
+    const result = await backupDatabase();
+    res.json(result);
+});
+
+// 获取备份列表
+app.get('/api/backups', async (req, res) => {
+    const backups = await getBackupList();
+    res.json({ success: true, backups });
+});
+
+// 恢复数据库
+app.post('/api/restore', async (req, res) => {
+    const { filename } = req.body;
+    if (!filename) {
+        return res.status(400).json({ success: false, error: '请选择备份文件' });
+    }
+    const result = await restoreDatabase(filename);
+    res.json(result);
+});
+
+// 删除备份
+app.delete('/api/backup', async (req, res) => {
+    try {
+        const { filename } = req.body;
+        if (!filename) {
+            return res.status(400).json({ success: false, error: '请选择备份文件' });
+        }
+        const result = await new Promise((resolve, reject) => {
+            const options = {
+                hostname: '127.0.0.1',
+                port: 3001,
+                path: '/api/monitor/backup',
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            };
+            const reqObj = require('http').request(options, (resObj) => {
+                let data = '';
+                resObj.on('data', chunk => data += chunk);
+                resObj.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+            });
+            reqObj.on('error', reject);
+            reqObj.setTimeout(5000, () => { reqObj.destroy(); reject(new Error('timeout')); });
+            reqObj.write(JSON.stringify({ filename }));
+            reqObj.end();
+        });
+        addLog(`删除备份: ${filename}`, 'info');
+        res.json(result);
+    } catch (err) {
+        addLog(`删除备份失败: ${err.message}`, 'error');
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 async function initDatabase() {
     try {
         dbPool = mysql.createPool(DB_CONFIG);
@@ -201,6 +276,179 @@ function addLog(message, type) {
     io.emit('new_log', log);
 }
 
+// 从主服务器获取数据库状态
+async function fetchMainDbStatus() {
+    try {
+        console.log('[DB-STATUS] 正在获取主服务器数据库状态...');
+        const dbRes = await new Promise((resolve, reject) => {
+            const req = require('http').get('http://127.0.0.1:3001/api/monitor/db-status', (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+            });
+            req.on('error', reject);
+            req.setTimeout(1000, () => { req.destroy(); reject(new Error('timeout')); });
+        });
+        const dbData = JSON.parse(dbRes);
+        console.log('[DB-STATUS] 收到数据:', dbData);
+        mainDbConfig.host = dbData.host;
+        mainDbConfig.port = dbData.port;
+        mainDbConfig.connected = dbData.connected;
+        console.log('[DB-STATUS] 更新后 mainDbConfig:', mainDbConfig);
+    } catch (err) {
+        console.error('[DB-STATUS] 获取失败:', err.message);
+        mainDbConfig.connected = false;
+    }
+}
+
+// 通过主服务器 API 备份数据库
+async function backupDatabase() {
+    try {
+        addLog('开始手动备份数据库...', 'info');
+        
+        const http = require('http');
+        const result = await new Promise((resolve, reject) => {
+            console.log('[DEBUG] 准备发送请求到 127.0.0.1:3001/api/monitor/backup');
+            
+            const options = {
+                hostname: '127.0.0.1',
+                port: 3001,
+                path: '/api/monitor/backup',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            };
+            
+            const req = http.request(options, (res) => {
+                console.log(`[DEBUG] 收到响应，状态码: ${res.statusCode}`);
+                let data = '';
+                res.on('data', chunk => {
+                    data += chunk;
+                    console.log(`[DEBUG] 收到数据块，当前长度: ${data.length}`);
+                });
+                res.on('end', () => {
+                    console.log(`[DEBUG] 响应结束，完整数据: ${data}`);
+                    try {
+                        const parsed = JSON.parse(data);
+                        console.log('[DEBUG] 解析成功:', parsed);
+                        resolve(parsed);
+                    } catch (e) {
+                        console.error('[DEBUG] 解析失败:', e, '原始数据:', data);
+                        reject(new Error(`响应解析失败: ${e.message} - 数据: ${data.substring(0, 200)}`));
+                    }
+                });
+            });
+            
+            req.on('error', (e) => {
+                console.error('[DEBUG] 请求错误:', e);
+                reject(new Error(`请求失败: ${e.message}`));
+            });
+            
+            req.setTimeout(60000, () => {
+                console.error('[DEBUG] 请求超时');
+                req.destroy();
+                reject(new Error('请求超时'));
+            });
+            
+            req.end();
+        });
+        
+        if (result.success) {
+            addLog(`数据库备份成功: ${result.filename}`, 'success');
+        } else {
+            addLog(`数据库备份失败: ${result.error || '未知错误'}`, 'error');
+        }
+        return result;
+    } catch (err) {
+        console.error('[DEBUG] 备份异常:', err);
+        addLog(`数据库备份失败: ${err.message}`, 'error');
+        return { success: false, error: err.message };
+    }
+}
+
+// 通过主服务器 API 恢复数据库
+async function restoreDatabase(filename) {
+    try {
+        addLog(`开始恢复数据库: ${filename}`, 'info');
+        const result = await new Promise((resolve, reject) => {
+            const options = {
+                hostname: '127.0.0.1',
+                port: 3001,
+                path: '/api/monitor/restore',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            };
+            const req = require('http').request(options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.setTimeout(30000, () => { req.destroy(); reject(new Error('timeout')); });
+            req.write(JSON.stringify({ filename }));
+            req.end();
+        });
+        if (result.success) {
+            addLog(`数据库恢复成功: ${filename}`, 'success');
+        } else {
+            addLog(`数据库恢复失败: ${result.error}`, 'error');
+        }
+        return result;
+    } catch (err) {
+        addLog(`数据库恢复失败: ${err.message}`, 'error');
+        return { success: false, error: err.message };
+    }
+}
+
+// 通过主服务器 API 获取备份列表
+async function getBackupList() {
+    try {
+        const result = await new Promise((resolve, reject) => {
+            const req = require('http').get('http://127.0.0.1:3001/api/monitor/backups', (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
+        });
+        return result.backups || [];
+    } catch (err) {
+        return [];
+    }
+}
+
+// 定时自动备份（每天晚上10点）
+let backupInterval = null;
+function startAutoBackup() {
+    const checkAndBackup = async () => {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        
+        // 每天晚上 10 点执行备份
+        if (hours === 22 && minutes === 0) {
+            addLog('开始自动备份数据库...', 'info');
+            await backupDatabase();
+        }
+    };
+
+    // 每分钟检查一次时间
+    backupInterval = setInterval(checkAndBackup, 60000);
+    addLog('自动备份功能已启用（每天 22:00）', 'info');
+}
+
 async function getSystemInfo() {
     try {
         // 获取在线用户数
@@ -221,6 +469,9 @@ async function getSystemInfo() {
             onlineCount = 0;
         }
         onlineUsers = onlineCount;
+
+        // 获取主服务器数据库状态
+        await fetchMainDbStatus();
 
         const [cpuLoad, memLoad, diskLoad, networkStats, osInfo] = await Promise.all([
             si.currentLoad(),
@@ -244,8 +495,8 @@ async function getSystemInfo() {
 
         return {
             timestamp: Date.now(),
-            dbHost: DB_CONFIG.host,
-            dbPort: DB_CONFIG.port,
+            dbHost: mainDbConfig.host,
+            dbPort: mainDbConfig.port,
             cpu: {
                 usage: parseFloat(cpuLoad.currentLoad.toFixed(1)),
                 cores: cpuLoad.cpus.length,
@@ -283,7 +534,7 @@ async function getSystemInfo() {
             },
             workerPool: workerPoolStats || { status: 'unknown' },
             mainServer: mainServerOk ? 'running' : 'unknown',
-            dbConnected,
+            dbConnected: mainDbConfig.connected,
             onlineUsers,
             abnormalAccountsCount,
             attackDetected
@@ -292,9 +543,9 @@ async function getSystemInfo() {
         return {
             timestamp: Date.now(),
             error: err.message,
-            dbHost: DB_CONFIG.host,
-            dbPort: DB_CONFIG.port,
-            dbConnected,
+            dbHost: mainDbConfig.host,
+            dbPort: mainDbConfig.port,
+            dbConnected: mainDbConfig.connected,
             onlineUsers,
             abnormalAccountsCount,
             attackDetected
@@ -522,6 +773,7 @@ async function startServer() {
     startResourceCollection();
     startAbnormalCheck();
     setTimeout(startWorkerPoolMonitor, 3000);
+    startAutoBackup();
     server.listen(PORT, '0.0.0.0', () => {
         console.log('');
         console.log('=========================================');

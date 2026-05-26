@@ -452,3 +452,109 @@ body {
 .server-toggle-btn.stop {
     background: var(--error);
 }
+
+.backup-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.backup-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent);
+    color: white;
+    transition: all 0.2s;
+}
+
+.backup-btn:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+.backup-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.auto-backup-info {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.backup-list-container {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+
+.backup-list-title {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.backup-list {
+    max-height: 150px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.backup-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.backup-item-name {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.backup-item-date {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.backup-item-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.backup-action-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.backup-action-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.backup-action-btn.danger:hover {
+    border-color: var(--error);
+    color: var(--error);
+}
+
+.backup-list::-webkit-scrollbar { width: 4px; }
+.backup-list::-webkit-scrollbar-track { background: transparent; }
+.backup-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }

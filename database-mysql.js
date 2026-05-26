@@ -137,4 +137,4 @@ const database = {
     }
 };
 
-module.exports = { initDatabase, database };
+module.exports = { initDatabase, database, DB_CONFIG, getPool: () => pool };

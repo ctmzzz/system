@@ -101,6 +101,8 @@ function initLogin() {
     });
 }
 
+let backupRefreshInterval = null;
+
 function showMonitor() {
     document.getElementById('loginPage').style.display = 'none';
     document.getElementById('monitorPage').style.display = 'flex';
@@ -108,6 +110,81 @@ function showMonitor() {
     initSocket();
     initChart();
     initServerControl();
+    initBackupBtn();
+    loadBackupList();
+    
+    // 每 30 秒刷新备份列表
+    if (backupRefreshInterval) clearInterval(backupRefreshInterval);
+    backupRefreshInterval = setInterval(loadBackupList, 30000);
+}
+
+// 加载备份列表
+async function loadBackupList() {
+    try {
+        const res = await fetch('/api/backups');
+        const data = await res.json();
+        const listEl = document.getElementById('backupList');
+        if (data.backups && data.backups.length > 0) {
+            listEl.innerHTML = data.backups.map(b => `
+                <div class="backup-item">
+                    <div>
+                        <div class="backup-item-name">${b.name}</div>
+                        <div class="backup-item-date">${b.date} · ${b.size}</div>
+                    </div>
+                    <div class="backup-item-actions">
+                        <button class="backup-action-btn" data-action="restore" data-file="${b.name}">恢复</button>
+                        <button class="backup-action-btn danger" data-action="delete" data-file="${b.name}">删除</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            // 绑定按钮事件
+            listEl.querySelectorAll('.backup-action-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const action = e.target.dataset.action;
+                    const file = e.target.dataset.file;
+                    
+                    if (action === 'restore') {
+                        if (confirm(`确定要恢复备份: ${file} 吗？\n这将覆盖当前数据库！`)) {
+                            try {
+                                const res = await fetch('/api/restore', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ filename: file })
+                                });
+                                const data = await res.json();
+                                if (data.success) {
+                                    alert('数据库恢复成功！');
+                                    await loadBackupList();
+                                } else {
+                                    alert('恢复失败: ' + (data.error || '未知错误'));
+                                }
+                            } catch (err) {
+                                alert('请求失败: ' + err.message);
+                            }
+                        }
+                    } else if (action === 'delete') {
+                        if (confirm(`确定要删除备份: ${file} 吗？`)) {
+                            try {
+                                const res = await fetch('/api/backup', {
+                                    method: 'DELETE',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ filename: file })
+                                });
+                                await loadBackupList();
+                            } catch (err) {
+                                alert('删除失败: ' + err.message);
+                            }
+                        }
+                    }
+                });
+            });
+        } else {
+            listEl.innerHTML = '<div style="color:#64748b;font-size:12px;padding:10px;">暂无备份</div>';
+        }
+    } catch (err) {
+        console.error('加载备份列表失败:', err);
+    }
 }
 
 function initLogoutBtn() {
@@ -123,6 +200,35 @@ function initLogoutBtn() {
         pendingRenderLogs = [];
         document.getElementById('logsContainer').innerHTML = '';
     });
+}
+
+// 手动备份按钮
+function initBackupBtn() {
+    const btn = document.getElementById('manualBackupBtn');
+    if (btn) {
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            btn.textContent = '备份中...';
+            try {
+                const res = await fetch('/api/backup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('备份成功！');
+                    await loadBackupList();
+                } else {
+                    alert('备份失败: ' + (data.error || '未知错误'));
+                }
+            } catch (err) {
+                alert('请求失败: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '手动备份';
+            }
+        });
+    }
 }
 
 function initLogWorker() {
@@ -345,8 +451,6 @@ function initFilterButtons() {
 function initServerControl() {
     const statusEl = document.getElementById('serverStatus');
     const toggleBtn = document.getElementById('serverToggleBtn');
-    const dbStatusEl = document.getElementById('dbStatus');
-    const dbHostEl = document.getElementById('dbHost');
     
     async function updateServerStatus() {
         try {
@@ -363,19 +467,8 @@ function initServerControl() {
                 toggleBtn.textContent = '启动';
                 toggleBtn.classList.remove('stop');
             }
-            
-            // 更新数据库状态（主服务器的）
-            if (data.running && data.dbConnected) {
-                dbStatusEl.innerHTML = '<span class="status-dot online"></span> 数据库: 已连接';
-                dbHostEl.textContent = 'MySQL 192.168.3.6:3306';
-            } else if (data.running) {
-                dbStatusEl.innerHTML = '<span class="status-dot offline"></span> 数据库: 连接中';
-            } else {
-                dbStatusEl.innerHTML = '<span class="status-dot offline"></span> 数据库: 未连接';
-            }
         } catch (e) {
             statusEl.innerHTML = '<span class="status-dot offline"></span> 状态: 检测失败';
-            dbStatusEl.innerHTML = '<span class="status-dot offline"></span> 数据库: 检测失败';
         }
     }
 

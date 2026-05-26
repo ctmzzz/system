@@ -148,7 +148,7 @@
                     </div>
                 </div>
 
-                <div class="card db-card">
+                <div class="card db-card" style="flex: 2; max-width: 400px;">
                     <div class="card-header">
                         <div class="card-icon db-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -157,12 +157,20 @@
                                 <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
                             </svg>
                         </div>
-                        <span>数据库</span>
+                        <span>数据库备份</span>
                     </div>
                     <div class="card-value db-value" id="dbStatus">
                         <span class="status-dot offline"></span> 数据库: 检测中
                     </div>
                     <div class="card-detail" id="dbHost">MySQL localhost:3306</div>
+                    <div class="backup-controls">
+                        <button id="manualBackupBtn" class="backup-btn">手动备份</button>
+                        <span class="auto-backup-info" id="autoBackupInfo">自动备份: 每天 22:00</span>
+                    </div>
+                    <div class="backup-list-container">
+                        <h4 class="backup-list-title">备份历史</h4>
+                        <div id="backupList" class="backup-list"></div>
+                    </div>
                 </div>
 
                 <div class="card server-card">

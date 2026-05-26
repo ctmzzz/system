@@ -313,7 +313,7 @@ function clearFailedLogin(req) {
 const captchaStore = new Map(); // token -> { answer, expires }
 const CAPTCHA_EXPIRE_MS = 5 * 60 * 1000; // 5分钟过期
 const CHECK_FOLDER_PATH = path.join(__dirname, 'check');
-const SLIDE_TOLERANCE = 30; // 允许误差15像素
+const SLIDE_TOLERANCE = 5; // 允许误差5%
 
 // 读取check文件夹中的图片
 function getCheckImages() {
@@ -335,28 +335,29 @@ function generateSlideCaptcha() {
     }
     
     const imagePath = checkImages[Math.floor(Math.random() * checkImages.length)];
-    const targetX = Math.floor(Math.random() * 200) + 50; // 滑块目标位置50-250
-    const targetY = Math.floor(Math.random() * 100) + 50; // Y坐标50-150
+    // 生成百分比坐标（相对于图片尺寸）
+    const targetXPercent = Math.floor(Math.random() * 40) + 30; // X轴：30%-70%
+    const targetYPercent = Math.floor(Math.random() * 40) + 30; // Y轴：30%-70%
     const shapeType = Math.floor(Math.random() * 4); // 4种不同形状
     
     const token = crypto.randomBytes(16).toString('hex');
     captchaStore.set(token, { 
-        answer: targetX, 
+        answer: targetXPercent, 
         expires: Date.now() + CAPTCHA_EXPIRE_MS,
-        y: targetY,
+        yPercent: targetYPercent,
         shapeType: shapeType
     });
     
     return { 
         token, 
         imagePath, 
-        targetX, 
-        targetY,
+        targetXPercent, 
+        targetYPercent,
         shapeType: shapeType
     };
 }
 
-function verifySlideCaptcha(token, userX) {
+function verifySlideCaptcha(token, userXPercent) {
     const record = captchaStore.get(token);
     if (!record) return false;
     if (Date.now() > record.expires) {
@@ -364,7 +365,7 @@ function verifySlideCaptcha(token, userX) {
         return false;
     }
     captchaStore.delete(token);
-    return Math.abs(userX - record.answer) <= SLIDE_TOLERANCE;
+    return Math.abs(userXPercent - record.answer) <= SLIDE_TOLERANCE;
 }
 
 // ===== 按账号跟踪登录失败次数 =====
@@ -589,8 +590,8 @@ app.get('/api/slide-captcha/generate', (req, res) => {
             success: true, 
             token: captcha.token, 
             imageUrl: '/check/' + imageName,
-            targetX: captcha.targetX,
-            targetY: captcha.targetY,
+            targetXPercent: captcha.targetXPercent,
+            targetYPercent: captcha.targetYPercent,
             shapeType: captcha.shapeType
         });
     } catch (e) {
@@ -5656,28 +5657,6 @@ app.post('/api/ollama/chat', async (req, res) => {
     }
 });
 
-// ===== 全局错误处理（防崩溃，放最后）=====
-app.use((err, req, res, next) => {
-    console.error('[ERROR]', err.stack || err);
-    if (!res.headersSent && res.writable) {
-        try {
-            res.status(500).json({ success: false, message: '服务器内部错误' });
-        } catch (writeErr) {
-            console.error('[ERROR] 发送错误响应失败:', writeErr.message);
-        }
-    }
-});
-
-// 404 处理（必须放在所有路由之后）
-app.use((req, res) => {
-    if (!res.headersSent && res.writable) {
-        if (req.path.startsWith('/api/')) {
-            return res.status(404).json({ success: false, message: '接口不存在' });
-        }
-        res.status(404).sendFile(path.join(__dirname, 'public', 'login.html'));
-    }
-});
-
 // ===== 进程级错误监听，防止崩溃 =====
 process.on('uncaughtException', (err) => {
     console.error('[FATAL] 未捕获的异常:', err);
@@ -5728,14 +5707,17 @@ async function startServer() {
     
     // ===== 通用错误处理中间件：捕获socket错误 =====
     app.use((req, res, next) => {
-        // 给每个请求的socket添加错误处理
-        req.socket.on('error', (err) => {
-            if (err.code === 'EPIPE' || err.code === 'ECONNRESET') {
-                console.warn('[安全] 客户端提前断开连接:', req.path);
-            } else {
-                console.error('[Socket错误]', req.path, ':', err);
-            }
-        });
+        // 给每个请求的socket添加错误处理（仅一次）
+        if (!req.socket._hasErrorHandler) {
+            req.socket._hasErrorHandler = true;
+            req.socket.on('error', (err) => {
+                if (err.code === 'EPIPE' || err.code === 'ECONNRESET') {
+                    console.warn('[安全] 客户端提前断开连接:', req.path);
+                } else {
+                    console.error('[Socket错误]', req.path, ':', err);
+                }
+            });
+        }
         next();
     });
 
@@ -5770,6 +5752,214 @@ async function startServer() {
             res.json(stats);
         } catch (err) {
             res.json({ status: 'error', message: err.message });
+        }
+    });
+
+    // 监控用：获取数据库状态
+    app.get('/api/monitor/db-status', async (req, res) => {
+        try {
+            const { database, DB_CONFIG } = require('./database-mysql');
+            const config = DB_CONFIG || { host: 'localhost', port: 3306 };
+            let connected = false;
+            try {
+                const result = await database.get('SELECT 1');
+                connected = result !== null;
+            } catch (err) {
+                connected = false;
+            }
+            res.json({
+                connected: connected,
+                host: config.host,
+                port: config.port
+            });
+        } catch (err) {
+            res.json({ connected: false, host: 'unknown', port: 3306, error: err.message });
+        }
+    });
+
+    // 备份数据库
+    const BACKUP_DIR = path.join(__dirname, 'database');
+    if (!fs.existsSync(BACKUP_DIR)) {
+        fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    }
+
+    app.post('/api/monitor/backup', async (req, res) => {
+        console.log('[BACKUP] 收到备份请求');
+        try {
+            const { getPool, DB_CONFIG: bakDB_CONFIG } = require('./database-mysql');
+            const DB_CONFIG = bakDB_CONFIG || { host: 'localhost', port: 3306, user: 'root', password: '123456', database: 'score_analysis' };
+            const pool = getPool();
+            
+            console.log('[BACKUP] DB_CONFIG:', { host: DB_CONFIG.host, port: DB_CONFIG.port, database: DB_CONFIG.database });
+            
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+            const backupFile = path.join(BACKUP_DIR, `${dateStr}.sql`);
+            console.log('[BACKUP] 备份文件路径:', backupFile);
+
+            console.log('[BACKUP] 正在获取数据库连接...');
+            const conn = await pool.getConnection();
+            console.log('[BACKUP] 数据库连接成功');
+            
+            let sqlContent = `-- 备份时间: ${now.toLocaleString()}\n`;
+            sqlContent += `-- 数据库: ${DB_CONFIG.database}\n`;
+            sqlContent += `-- 主机: ${DB_CONFIG.host}:${DB_CONFIG.port}\n\n`;
+            sqlContent += `SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";\n`;
+            sqlContent += `SET AUTOCOMMIT = 0;\n`;
+            sqlContent += `START TRANSACTION;\n`;
+            sqlContent += `SET time_zone = "+00:00";\n\n`;
+            sqlContent += `CREATE DATABASE IF NOT EXISTS \`${DB_CONFIG.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n`;
+            sqlContent += `USE \`${DB_CONFIG.database}\`;\n\n`;
+
+            console.log('[BACKUP] 正在获取表列表...');
+            const [tables] = await conn.query('SHOW TABLES');
+            console.log('[BACKUP] 找到表数量:', tables.length);
+            
+            for (const tableObj of tables) {
+                const tableName = Object.values(tableObj)[0];
+                console.log('[BACKUP] 正在处理表:', tableName);
+                sqlContent += `-- 表: ${tableName}\n`;
+
+                const [createTable] = await conn.query(`SHOW CREATE TABLE \`${tableName}\``);
+                sqlContent += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
+                sqlContent += `${createTable[0]['Create Table']};\n\n`;
+
+                const [rows] = await conn.query(`SELECT * FROM \`${tableName}\``);
+                if (rows.length > 0) {
+                    console.log(`[BACKUP] 表 ${tableName} 有 ${rows.length} 行数据`);
+                    sqlContent += `LOCK TABLES \`${tableName}\` WRITE;\n`;
+
+                    for (const row of rows) {
+                        const values = Object.values(row).map(v => {
+                            if (v === null) return 'NULL';
+                            if (typeof v === 'number') return v;
+                            const str = String(v);
+                            return `'${str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\x00/g, '\\0')}'`;
+                        });
+                        sqlContent += `INSERT INTO \`${tableName}\` VALUES (${values.join(', ')});\n`;
+                    }
+                    sqlContent += `UNLOCK TABLES;\n\n`;
+                }
+            }
+
+            sqlContent += 'COMMIT;\n';
+
+            console.log('[BACKUP] 正在写入文件...');
+            fs.writeFileSync(backupFile, sqlContent, 'utf8');
+            console.log('[BACKUP] 文件写入成功，大小:', (fs.statSync(backupFile).size / 1024).toFixed(2), 'KB');
+            conn.release();
+
+            const response = { success: true, filename: path.basename(backupFile) };
+            console.log('[BACKUP] 响应:', response);
+            res.json(response);
+        } catch (err) {
+            console.error('[BACKUP] 备份失败:', err);
+            console.error('[BACKUP] 错误堆栈:', err.stack);
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 获取备份列表
+    app.get('/api/monitor/backups', (req, res) => {
+        try {
+            if (!fs.existsSync(BACKUP_DIR)) return res.json({ success: true, backups: [] });
+            const files = fs.readdirSync(BACKUP_DIR);
+            const backups = files
+                .filter(f => f.endsWith('.sql'))
+                .map(f => {
+                    const fullPath = path.join(BACKUP_DIR, f);
+                    const stat = fs.statSync(fullPath);
+                    return {
+                        name: f,
+                        date: new Date(stat.mtime).toLocaleString('zh-CN'),
+                        size: (stat.size / 1024).toFixed(2) + ' KB'
+                    };
+                })
+                .sort((a, b) => b.name.localeCompare(a.name));
+            res.json({ success: true, backups });
+        } catch (err) {
+            res.json({ success: true, backups: [] });
+        }
+    });
+
+    // 恢复数据库
+    app.post('/api/monitor/restore', async (req, res) => {
+        try {
+            const { filename } = req.body;
+            if (!filename) {
+                return res.status(400).json({ success: false, error: '请选择备份文件' });
+            }
+            const backupFile = path.join(BACKUP_DIR, filename);
+            if (!fs.existsSync(backupFile)) {
+                return res.status(400).json({ success: false, error: '备份文件不存在' });
+            }
+
+            const { getPool, DB_CONFIG: restDB_CONFIG } = require('./database-mysql');
+            const DB_CONFIG = restDB_CONFIG || { host: 'localhost', port: 3306, user: 'root', password: '123456' };
+
+            const sqlContent = fs.readFileSync(backupFile, 'utf8');
+            const pool = getPool();
+            const conn = await pool.getConnection();
+
+            const statements = sqlContent
+                .split(';')
+                .map(s => s.trim())
+                .filter(s => s && !s.startsWith('--'));
+
+            for (const stmt of statements) {
+                if (stmt) {
+                    try {
+                        await conn.query(stmt);
+                    } catch (e) {
+                        console.log('执行SQL警告:', e.message);
+                    }
+                }
+            }
+
+            conn.release();
+            res.json({ success: true });
+        } catch (err) {
+            console.error('恢复失败:', err);
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 删除备份
+    app.delete('/api/monitor/backup', async (req, res) => {
+        try {
+            const { filename } = req.body;
+            if (!filename) {
+                return res.status(400).json({ success: false, error: '请选择备份文件' });
+            }
+            const backupFile = path.join(BACKUP_DIR, filename);
+            if (fs.existsSync(backupFile)) {
+                fs.unlinkSync(backupFile);
+            }
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // ===== 全局错误处理（防崩溃，放最后）=====
+    app.use((err, req, res, next) => {
+        console.error('[ERROR]', err.stack || err);
+        if (!res.headersSent && res.writable) {
+            try {
+                res.status(500).json({ success: false, message: '服务器内部错误' });
+            } catch (writeErr) {
+                console.error('[ERROR] 发送错误响应失败:', writeErr.message);
+            }
+        }
+    });
+
+    // 404 处理（必须放在所有路由之后）
+    app.use((req, res) => {
+        if (!res.headersSent && res.writable) {
+            if (req.path.startsWith('/api/')) {
+                return res.status(404).json({ success: false, message: '接口不存在' });
+            }
+            res.status(404).sendFile(path.join(__dirname, 'public', 'login.html'));
         }
     });
 
