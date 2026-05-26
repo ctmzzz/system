@@ -17,6 +17,12 @@
     var startWidth = 0;
     var startHeight = 0;
     var lastChatPage = null; // 记录上次打开对话时的页面
+    var isStreaming = false; // 是否正在流式输出
+    var currentController = null; // 当前请求的AbortController
+    var currentTimeoutId = null; // 当前超时定时器
+    var currentBotBubble = null; // 当前正在输出的bot气泡
+    var currentBotText = ''; // 当前正在输出的bot文本
+    var isUserStopped = false; // 是否是用户主动停止
 
     function createFloatBtn() {
         var btn = document.createElement('button');
@@ -78,7 +84,13 @@
         sendBtn.title = '发送';
         sendBtn.style.cssText = 'width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#4F46E5,#7C3AED);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;transition:transform 0.15s;';
         sendBtn.textContent = '➤';
-        sendBtn.onclick = sendMessage;
+        sendBtn.onclick = function() {
+            if (isStreaming) {
+                stopStream();
+            } else {
+                sendMessage();
+            }
+        };
         sendBtn.onmouseover = function() {
             this.style.transform = 'scale(1.05)';
         };
@@ -217,6 +229,7 @@
             if (endMonth && endMonth.value) selection.end_month = endMonth.value;
         }
 
+        console.log('[AI] 当前页:', path, '选择:', selection);
         return selection;
     }
 
@@ -271,9 +284,50 @@
         }
     }
 
+    // 更新按钮状态（发送/停止切换）
+    function updateSendButton(isStopMode) {
+        var btn = document.getElementById('aiChatSend');
+        if (!btn) return;
+        if (isStopMode) {
+            btn.textContent = '■';
+            btn.title = '停止';
+            btn.style.background = 'linear-gradient(135deg,#EF4444,#DC2626)';
+        } else {
+            btn.textContent = '➤';
+            btn.title = '发送';
+            btn.style.background = 'linear-gradient(135deg,#4F46E5,#7C3AED)';
+        }
+    }
+
+    // 停止当前流式输出
+    function stopStream() {
+        if (!isStreaming) return;
+        isUserStopped = true; // 标记为用户主动停止
+        if (currentController) {
+            currentController.abort();
+        }
+        if (currentTimeoutId) {
+            clearTimeout(currentTimeoutId);
+        }
+        // 保存当前已输出的文本到历史（已在currentBotText中，会在重置前保存）
+        if (currentBotText && currentBotBubble) {
+            messages.push({ role: 'assistant', content: currentBotText });
+        }
+        // 重置状态
+        isStreaming = false;
+        currentController = null;
+        currentTimeoutId = null;
+        currentBotBubble = null;
+        currentBotText = '';
+        updateSendButton(false);
+        var input = document.getElementById('aiChatInput');
+        if (input) input.disabled = false;
+    }
+
     async function doInitialAnalysis() {
         if (isAnalyzing || hasInitialAnalysis) return;
         isAnalyzing = true;
+        isUserStopped = false;
 
         var msgArea = document.getElementById('aiChatMessages');
         var initialHint = createHint('正在获取数据...');
@@ -295,9 +349,11 @@
                 }
             }
 
+            console.log('[AI分析] 请求上下文:', queryParams.toString());
+
             var ctxRes = await fetch('/api/ai/context?' + queryParams.toString());
             var ctxData = await ctxRes.json();
-            console.log('[AI分析] 上下文接口返回:', ctxData.success, ctxData.data ? '有数据' : '无数据');
+            console.log('[AI分析] 上下文接口返回:', ctxData);
 
             if (!ctxData.success || !ctxData.data || !ctxData.data.context) {
                 updateHint('暂无数据可分析，您可以自由提问');
@@ -319,6 +375,14 @@
             var controller = new AbortController();
             var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
 
+            // 设置全局状态以支持停止
+            isStreaming = true;
+            currentController = controller;
+            currentTimeoutId = timeoutId;
+            currentBotBubble = botBubble;
+            currentBotText = '';
+            updateSendButton(true);
+
             var response = await fetch(PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -333,6 +397,7 @@
             clearTimeout(timeoutId);
             isNetworkTimeout = false;
             timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+            currentTimeoutId = timeoutId;
 
             if (!response.ok) {
                 throw new Error('AI服务返回错误: ' + response.status);
@@ -366,11 +431,13 @@
                             // Ollama 格式
                             botText += data.message.content;
                             botBubble.innerHTML = formatText(botText);
+                            currentBotText = botText;
                             scrollToBottom();
                         } else if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
                             // OpenAI/Qwen 格式
                             botText += data.choices[0].delta.content;
                             botBubble.innerHTML = formatText(botText);
+                            currentBotText = botText;
                             scrollToBottom();
                         }
                     } catch (e) {}
@@ -390,26 +457,34 @@
             msgArea.appendChild(finalHint);
 
         } catch (error) {
-            clearTimeout(timeoutId);
+            clearTimeout(currentTimeoutId);
             console.error('[AI分析] 失败:', error.message || error);
-            if (botBubble) {
+            // 如果不是用户主动停止，才显示错误
+            if (!isUserStopped && botBubble) {
                 if (error.name === 'AbortError') {
-                    if (isNetworkTimeout) {
-                        botBubble.textContent = '❌ 网络连接失败，请稍后再试';
-                    } else {
-                        botBubble.textContent = '服务器繁忙，请稍后再试';
-                    }
+                    botBubble.textContent = '服务器繁忙，请稍后再试';
                 } else {
                     botBubble.textContent = '❌ 网络连接失败，请稍后再试';
                 }
+                removeHint();
+                var errorHint = createHint('自动分析失败，您可手动输入问题');
+                msgArea.appendChild(errorHint);
+            } else {
+                // 用户主动停止，保留已输出内容，不添加错误提示
+                removeHint();
             }
-            removeHint();
-            var errorHint = createHint('自动分析失败，您可手动输入问题');
-            msgArea.appendChild(errorHint);
         }
 
+        // 重置状态
+        isStreaming = false;
+        currentController = null;
+        currentTimeoutId = null;
+        currentBotBubble = null;
+        currentBotText = '';
+        updateSendButton(false);
         hasInitialAnalysis = true;
         isAnalyzing = false;
+        isUserStopped = false;
     }
 
     var lastContextSelection = null;
@@ -417,7 +492,7 @@
     async function refreshContext() {
         try {
             var selection = getCurrentPageSelection();
-            console.log('[AI分析] 获取最新选择:', selection);
+            console.log('[AI分析] 刷新上下文，选择:', selection);
 
             var identityChanged = false;
             if (lastContextSelection) {
@@ -443,6 +518,7 @@
 
             var ctxRes = await fetch('/api/ai/context?' + queryParams.toString());
             var ctxData = await ctxRes.json();
+            console.log('[AI分析] 刷新上下文返回:', ctxData);
 
             if (ctxData.success && ctxData.data && ctxData.data.context) {
                 var systemMessage = { role: 'system', content: ctxData.data.context };
@@ -471,7 +547,8 @@
     async function sendMessage() {
         var input = document.getElementById('aiChatInput');
         var text = input.value.trim();
-        if (!text) return;
+        if (!text || isStreaming) return;
+        isUserStopped = false;
 
         // 教师端：首次提问先刷新上下文（获取考试班级数据），但不自动分析
         if (userRole === 'teacher' && messages.length === 0) {
@@ -498,6 +575,14 @@
         var controller = new AbortController();
         var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
 
+        // 设置全局状态
+        isStreaming = true;
+        currentController = controller;
+        currentTimeoutId = timeoutId;
+        currentBotBubble = botBubble;
+        currentBotText = '';
+        updateSendButton(true);
+
         try {
             var response = await fetch(PROXY_URL, {
                 method: 'POST',
@@ -513,6 +598,7 @@
             clearTimeout(timeoutId);
             isNetworkTimeout = false;
             timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+            currentTimeoutId = timeoutId;
 
             if (!response.ok) {
                 throw new Error('网络错误: ' + response.status);
@@ -546,11 +632,13 @@
                             // Ollama 格式
                             botText += data.message.content;
                             botBubble.innerHTML = formatText(botText);
+                            currentBotText = botText;
                             scrollToBottom();
                         } else if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
                             // OpenAI/Qwen 格式
                             botText += data.choices[0].delta.content;
                             botBubble.innerHTML = formatText(botText);
+                            currentBotText = botText;
                             scrollToBottom();
                         }
                     } catch (e) {}
@@ -562,21 +650,33 @@
             messages.push({ role: 'assistant', content: botText });
 
         } catch (error) {
-            clearTimeout(timeoutId);
-            if (error.name === 'AbortError') {
-                if (isNetworkTimeout) {
-                    botBubble.textContent = '❌ 网络连接失败，请稍后再试';
+            clearTimeout(currentTimeoutId);
+            console.error('[AI聊天] 错误:', error);
+            // 如果不是用户主动停止，才显示错误
+            if (!isUserStopped && botBubble) {
+                if (error.name === 'AbortError') {
+                    if (isNetworkTimeout) {
+                        botBubble.textContent = '❌ 网络连接失败，请稍后再试';
+                    } else {
+                        botBubble.textContent = '服务器繁忙，请稍后再试';
+                    }
                 } else {
-                    botBubble.textContent = '服务器繁忙，请稍后再试';
+                    botBubble.textContent = '❌ 网络连接失败，请稍后再试';
                 }
-            } else {
-                botBubble.textContent = '❌ 网络连接失败，请稍后再试';
             }
-            console.error(error);
+            // 用户主动停止：已在stopStream中保存了内容，不显示错误
         }
 
+        // 重置状态
+        isStreaming = false;
+        currentController = null;
+        currentTimeoutId = null;
+        currentBotBubble = null;
+        currentBotText = '';
+        updateSendButton(false);
         input.disabled = false;
         input.focus();
+        isUserStopped = false;
     }
 
     function openChat() {
@@ -588,7 +688,7 @@
 
         // 只有切换页面或从未打开过时才重置
         if (isPageChanged || lastChatPage === null) {
-            if (!isAnalyzing) {
+            if (!isAnalyzing && !isStreaming) {
                 // 重置状态
                 messages = [];
                 hasInitialAnalysis = false;
@@ -701,7 +801,7 @@
                 if ((userRole === 'teacher' || userRole === 'student') && !isExcluded) {
                     createFloatBtn();
                     createChatBox();
-                    console.log('[AI助手] 已初始化，角色:', userRole);
+                    console.log('[AI助手] 已初始化，角色:', userRole, '当前页:', currentPage);
                 }
             }
         } catch (e) {

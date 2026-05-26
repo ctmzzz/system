@@ -976,13 +976,7 @@
 
         .slide-captcha-block {
             position: absolute;
-            width: 50px;
-            height: 50px;
-            border-radius: 4px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
             pointer-events: none;
-            background: rgba(255, 255, 255, 0.1);
         }
 
         #slideCaptchaBlockCanvas {
@@ -1091,6 +1085,19 @@
         }
 
         .slide-captcha-error.show {
+            display: block;
+        }
+
+        .slide-captcha-success {
+            color: #22d3ee;
+            text-align: center;
+            font-size: 15px;
+            font-weight: bold;
+            margin-top: 12px;
+            display: none;
+        }
+
+        .slide-captcha-success.show {
             display: block;
         }
     </style>
@@ -1404,6 +1411,7 @@
             const slideCaptchaRefresh = document.getElementById('slideCaptchaRefresh');
             const slideCaptchaClose = document.getElementById('slideCaptchaClose');
             const slideCaptchaError = document.getElementById('slideCaptchaError');
+            const slideCaptchaSuccess = document.getElementById('slideCaptchaSuccess');
 
             let slideCaptchaData = null;
             let isDragging = false;
@@ -1425,8 +1433,14 @@
                 setTimeout(() => slideCaptchaError.classList.remove('show'), 2000);
             }
 
+            function showSlideCaptchaSuccess(message) {
+                slideCaptchaSuccess.textContent = message;
+                slideCaptchaSuccess.classList.add('show');
+            }
+
             async function generateSlideCaptcha() {
                 try {
+                    slideCaptchaSuccess.classList.remove('show');
                     const res = await fetch('/api/slide-captcha/generate');
                     const data = await res.json();
                     if (data.success) {
@@ -1571,6 +1585,24 @@
                     case 3:
                         drawPuzzleShape4(ctx, centerX - halfL, centerY - halfL, l, r);
                         break;
+                    case 4:
+                        drawPuzzleShape5(ctx, centerX - halfL, centerY - halfL, l, r);
+                        break;
+                    case 5:
+                        drawPuzzleShape6(ctx, centerX - halfL, centerY - halfL, l, r);
+                        break;
+                    case 6:
+                        drawPuzzleShape7(ctx, centerX - halfL, centerY - halfL, l, r);
+                        break;
+                    case 7:
+                        drawPuzzleShape8(ctx, centerX - halfL, centerY - halfL, l, r);
+                        break;
+                    case 8:
+                        drawPuzzleShape9(ctx, centerX - halfL, centerY - halfL, l, r);
+                        break;
+                    case 9:
+                        drawPuzzleShape10(ctx, centerX - halfL, centerY - halfL, l, r);
+                        break;
                     default:
                         drawPuzzleShape1(ctx, centerX - halfL, centerY - halfL, l, r);
                 }
@@ -1637,6 +1669,91 @@
                 ctx.lineTo(x, y);
             }
 
+            // 形状5：顶部和底部都有凸起
+            function drawPuzzleShape5(ctx, x, y, l, r) {
+                ctx.moveTo(x, y + l * 0.35);
+                ctx.arc(x + r, y + l * 0.5, r, -Math.PI / 2, Math.PI / 2, false);
+                ctx.lineTo(x, y + l);
+                ctx.lineTo(x + l * 0.35, y + l);
+                ctx.arc(x + l * 0.5, y + l - r, r, Math.PI, 0, true);
+                ctx.lineTo(x + l * 0.65, y + l);
+                ctx.lineTo(x + l, y + l);
+                ctx.lineTo(x + l, y + l * 0.65);
+                ctx.arc(x + l - r, y + l * 0.5, r, Math.PI / 2, -Math.PI / 2, true);
+                ctx.lineTo(x + l, y);
+                ctx.lineTo(x + l * 0.65, y);
+                ctx.arc(x + l * 0.5, y + r, r, 0, Math.PI, false);
+                ctx.lineTo(x + l * 0.35, y);
+                ctx.lineTo(x, y);
+                ctx.lineTo(x, y + l * 0.35);
+            }
+
+            // 形状6：菱形风格
+            function drawPuzzleShape6(ctx, x, y, l, r) {
+                const midX = x + l / 2;
+                const midY = y + l / 2;
+                ctx.moveTo(midX, y);
+                ctx.lineTo(x + l, midY);
+                ctx.lineTo(midX, y + l);
+                ctx.lineTo(x, midY);
+                ctx.lineTo(midX, y);
+            }
+
+            // 形状7：六边形
+            function drawPuzzleShape7(ctx, x, y, l, r) {
+                const step = l / 3;
+                ctx.moveTo(x + step, y);
+                ctx.lineTo(x + 2 * step, y);
+                ctx.lineTo(x + l, y + l / 2);
+                ctx.lineTo(x + 2 * step, y + l);
+                ctx.lineTo(x + step, y + l);
+                ctx.lineTo(x, y + l / 2);
+                ctx.lineTo(x + step, y);
+            }
+
+            // 形状8：心形拼图
+            function drawPuzzleShape8(ctx, x, y, l, r) {
+                const cx = x + l / 2;
+                const cy = y + l / 2;
+                const heartR = l * 0.25;
+                ctx.moveTo(cx, cy + l * 0.3);
+                ctx.bezierCurveTo(cx - heartR, cy, cx - heartR * 2, cy - heartR, cx - heartR, cy - heartR);
+                ctx.bezierCurveTo(cx, cy - heartR * 1.5, cx, cy - heartR, cx, cy - heartR);
+                ctx.bezierCurveTo(cx, cy - heartR, cx, cy - heartR * 1.5, cx + heartR, cy - heartR);
+                ctx.bezierCurveTo(cx + heartR * 2, cy - heartR, cx + heartR, cy, cx, cy + l * 0.3);
+            }
+
+            // 形状9：星形拼图
+            function drawPuzzleShape9(ctx, x, y, l, r) {
+                const cx = x + l / 2;
+                const cy = y + l / 2;
+                const outerR = l * 0.4;
+                const innerR = l * 0.18;
+                const spikes = 5;
+                for (let i = 0; i < spikes * 2; i++) {
+                    const radius = i % 2 === 0 ? outerR : innerR;
+                    const angle = (i * Math.PI / spikes) - Math.PI / 2;
+                    const px = cx + radius * Math.cos(angle);
+                    const py = cy + radius * Math.sin(angle);
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+            }
+
+            // 形状10：箭头形状
+            function drawPuzzleShape10(ctx, x, y, l, r) {
+                const arrowW = l * 0.4;
+                ctx.moveTo(x + l, y + l / 2);
+                ctx.lineTo(x + arrowW, y);
+                ctx.lineTo(x + arrowW, y + l * 0.3);
+                ctx.lineTo(x, y + l * 0.3);
+                ctx.lineTo(x, y + l * 0.7);
+                ctx.lineTo(x + arrowW, y + l * 0.7);
+                ctx.lineTo(x + arrowW, y + l);
+                ctx.lineTo(x + l, y + l / 2);
+            }
+
             function getImageAreaBounds() {
                 const containerWidth = slideCaptchaCanvas.parentElement.clientWidth;
                 const containerHeight = 200;
@@ -1662,9 +1779,9 @@
                 if (!captchaImage) return;
                 
                 const bounds = getImageAreaBounds();
-                currentX = bounds.left; // 从图片区域左边缘开始
-                slideCaptchaBtn.style.left = (bounds.left + 2) + 'px';
-                slideCaptchaProgress.style.left = bounds.left + 'px';
+                currentX = 2;
+                slideCaptchaBtn.style.left = '2px';
+                slideCaptchaProgress.style.left = '0px';
                 slideCaptchaProgress.style.width = '0';
                 
                 // 设置滑块初始位置
@@ -1721,16 +1838,21 @@
                 if (!isDragging || !captchaImage) return;
                 const clientX = e.type === 'mousemove' ? e.clientX : e.touches[0].clientX;
                 const bounds = getImageAreaBounds();
-                let moveX = clientX - startX + bounds.left;
+                const sliderWidth = slideCaptchaBtn.parentElement.clientWidth;
+                const sliderMax = sliderWidth - 44;
+                let moveX = clientX - startX + 2;
                 
-                if (moveX < bounds.left) moveX = bounds.left;
-                if (moveX > bounds.left + bounds.width - 44) moveX = bounds.left + bounds.width - 44;
+                if (moveX < 2) moveX = 2;
+                if (moveX > sliderMax) moveX = sliderMax;
                 
                 currentX = moveX;
-                slideCaptchaBtn.style.left = (moveX + 2) + 'px';
-                slideCaptchaProgress.style.left = bounds.left + 'px';
-                slideCaptchaProgress.style.width = (moveX - bounds.left) + 'px';
-                slideCaptchaBlock.style.left = (moveX - BLOCK_SIZE/2) + 'px';
+                slideCaptchaBtn.style.left = moveX + 'px';
+                slideCaptchaProgress.style.left = '0px';
+                slideCaptchaProgress.style.width = moveX + 'px';
+                
+                const ratio = (moveX - 2) / (sliderMax - 2);
+                const blockLeft = bounds.left + ratio * bounds.width - BLOCK_SIZE / 2;
+                slideCaptchaBlock.style.left = blockLeft + 'px';
             }
 
             async function endDrag(e) {
@@ -1741,27 +1863,13 @@
                 slideCaptchaProgress.style.transition = 'width 0.2s';
                 slideCaptchaBlock.style.transition = 'left 0.2s';
                 
-                // 计算当前滑动距离对应的百分比坐标
-                const containerWidth = slideCaptchaCanvas.parentElement.clientWidth;
-                const containerHeight = 200;
-                const imgRatio = captchaImage.width / captchaImage.height;
-                const containerRatio = containerWidth / containerHeight;
-                let drawWidth, drawHeight, drawX;
+                const sliderWidth = slideCaptchaBtn.parentElement.clientWidth;
+                const sliderMax = sliderWidth - 44;
+                const sliderRatio = (currentX - 2) / (sliderMax - 2);
+                const userXPercent = sliderRatio * 100;
                 
-                if (imgRatio > containerRatio) {
-                    drawHeight = containerHeight;
-                    drawWidth = drawHeight * imgRatio;
-                    drawX = (containerWidth - drawWidth) / 2;
-                } else {
-                    drawWidth = containerWidth;
-                    drawHeight = drawWidth / imgRatio;
-                    drawX = 0;
-                }
-                
-                const scaleX = drawWidth / captchaImage.width;
-                // 计算用户拖动位置相对于图片区域的百分比
-                const userXRelative = currentX - drawX; // 相对于图片区域的像素
-                const userXPercent = (userXRelative / drawWidth) * 100;
+                const bounds = getImageAreaBounds();
+                const scaleX = bounds.width / captchaImage.width;
                 
                 try {
                     const res = await fetch('/api/slide-captcha/verify', {
@@ -1775,22 +1883,25 @@
                     const data = await res.json();
                     
                     if (data.success) {
-                        // 验证成功，滑块固定到正确位置显示成功效果
                         const targetXOnImage = (slideCaptchaData.targetXPercent / 100) * captchaImage.width;
-                        const actualTargetX = drawX + targetXOnImage * scaleX - BLOCK_SIZE/2;
+                        const actualTargetX = bounds.left + targetXOnImage * scaleX - BLOCK_SIZE / 2;
                         slideCaptchaBlock.style.transition = 'left 0.3s ease';
                         slideCaptchaBlock.style.left = actualTargetX + 'px';
                         
                         // 绿色成功效果
                         slideCaptchaBlock.style.boxShadow = '0 0 10px rgba(34, 211, 238, 0.8), 0 2px 10px rgba(0, 0, 0, 0.4)';
                         
+                        // 显示验证成功提示
+                        showSlideCaptchaSuccess('验证成功！正在登录...');
+                        
+                        // 1秒后关闭并登录
                         setTimeout(() => {
                             closeSlideCaptcha();
                             executeLogin();
-                        }, 500);
+                        }, 1000);
                     } else {
                         // 验证失败，重置
-                        showSlideCaptchaError('验证失败，请重试');
+                        showSlideCaptchaError(data.message || '验证失败，请重试');
                         setTimeout(() => {
                             generateSlideCaptcha();
                         }, 500);
@@ -2179,6 +2290,7 @@
                 <button id="slideCaptchaClose" class="slide-captcha-btn-close">取消</button>
             </div>
             <div id="slideCaptchaError" class="slide-captcha-error"></div>
+            <div id="slideCaptchaSuccess" class="slide-captcha-success"></div>
         </div>
     </div>
 </body>

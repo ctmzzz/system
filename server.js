@@ -338,7 +338,7 @@ function generateSlideCaptcha() {
     // 生成百分比坐标（相对于图片尺寸）
     const targetXPercent = Math.floor(Math.random() * 40) + 30; // X轴：30%-70%
     const targetYPercent = Math.floor(Math.random() * 40) + 30; // Y轴：30%-70%
-    const shapeType = Math.floor(Math.random() * 4); // 4种不同形状
+    const shapeType = Math.floor(Math.random() * 10); // 10种不同形状
     
     const token = crypto.randomBytes(16).toString('hex');
     captchaStore.set(token, { 
@@ -388,6 +388,87 @@ function getAccountFailedCount(employee_id) {
 
 function clearAccountFailed(employee_id) {
     accountFailedAttempts.delete(employee_id);
+}
+
+// ===== IP跟踪和锁定机制 =====
+const ipAttempts = new Map(); // ip -> { captchaFails: 0, cooldownUntil: 0, locked: false, lockTime: 0, reason: '' }
+const CAPTCHA_FAIL_COOLDOWN_THRESHOLD = 5; // 5次失败后进入冷却
+const CAPTCHA_FAIL_LOCK_THRESHOLD = 10; // 10次失败后锁定IP
+const COOLDOWN_TIME_MS = 10 * 60 * 1000; // 10分钟冷却
+
+function getClientIP(req) {
+    return req.ip || 
+           req.connection.remoteAddress || 
+           req.socket.remoteAddress || 
+           (req.connection.socket ? req.connection.socket.remoteAddress : null);
+}
+
+function getIpRecord(ip) {
+    if (!ipAttempts.has(ip)) {
+        ipAttempts.set(ip, { captchaFails: 0, cooldownUntil: 0, locked: false, lockTime: 0, reason: '' });
+    }
+    return ipAttempts.get(ip);
+}
+
+function isIpLocked(ip) {
+    const record = getIpRecord(ip);
+    return record.locked;
+}
+
+function isIpInCooldown(ip) {
+    const record = getIpRecord(ip);
+    return Date.now() < record.cooldownUntil;
+}
+
+function recordCaptchaFailed(ip) {
+    const record = getIpRecord(ip);
+    record.captchaFails++;
+    
+    if (record.captchaFails >= CAPTCHA_FAIL_LOCK_THRESHOLD) {
+        record.locked = true;
+        record.lockTime = Date.now();
+        record.reason = '连续验证码验证失败次数过多';
+        record.captchaFails = 0;
+        console.log('[安全] IP已锁定: ' + ip + ' 原因: ' + record.reason);
+    } else if (record.captchaFails >= CAPTCHA_FAIL_COOLDOWN_THRESHOLD) {
+        record.cooldownUntil = Date.now() + COOLDOWN_TIME_MS;
+        record.captchaFails = 0;
+        console.log('[安全] IP进入冷却: ' + ip + ' 冷却结束: ' + new Date(record.cooldownUntil).toLocaleString());
+    }
+}
+
+function recordCaptchaSuccess(ip) {
+    const record = getIpRecord(ip);
+    // 验证成功重置失败计数，但如果已锁定则不解锁
+    if (!record.locked) {
+        record.captchaFails = 0;
+        record.cooldownUntil = 0;
+    }
+}
+
+function unlockIp(ip) {
+    const record = getIpRecord(ip);
+    record.locked = false;
+    record.captchaFails = 0;
+    record.cooldownUntil = 0;
+    record.lockTime = 0;
+    record.reason = '';
+    console.log('[安全] IP已解锁: ' + ip);
+}
+
+function getLockedIps() {
+    const locked = [];
+    for (const [ip, record] of ipAttempts.entries()) {
+        if (record.locked) {
+            locked.push({
+                ip: ip,
+                lockTime: record.lockTime,
+                reason: record.reason,
+                captchaFails: record.captchaFails
+            });
+        }
+    }
+    return locked;
 }
 
 // API 路由禁用缓存（确保删除后其他页面不显示旧数据）
@@ -602,11 +683,47 @@ app.get('/api/slide-captcha/generate', (req, res) => {
 // 验证滑动验证码
 app.post('/api/slide-captcha/verify', (req, res) => {
     const { token, x } = req.body;
+    const ip = getClientIP(req);
+    
     if (!token || x === undefined) {
         return res.status(400).json({ success: false, message: '参数错误' });
     }
+    
+    // 检查IP是否被锁定
+    if (isIpLocked(ip)) {
+        return res.status(403).json({ success: false, message: '您的IP已被临时禁止访问，请联系管理员' });
+    }
+    
+    // 检查IP是否在冷却期
+    if (isIpInCooldown(ip)) {
+        const record = getIpRecord(ip);
+        const remaining = Math.ceil((record.cooldownUntil - Date.now()) / 1000);
+        return res.status(429).json({ 
+            success: false, 
+            message: `验证失败次数过多，请等待 ${remaining} 秒后重试` 
+        });
+    }
+    
     const success = verifySlideCaptcha(token, x);
-    res.json({ success });
+    
+    if (success) {
+        recordCaptchaSuccess(ip);
+        res.json({ success: true });
+    } else {
+        recordCaptchaFailed(ip);
+        const record = getIpRecord(ip);
+        let message = '验证失败，请重试';
+        if (record.locked) {
+            message = '您的IP已被临时禁止访问，请联系管理员';
+        } else if (record.cooldownUntil > Date.now()) {
+            const remainingSeconds = Math.ceil((record.cooldownUntil - Date.now()) / 1000);
+            message = `验证失败次数过多，请等待 ${remainingSeconds} 秒后重试`;
+        } else if (record.captchaFails >= 3) {
+            const remaining = CAPTCHA_FAIL_COOLDOWN_THRESHOLD - record.captchaFails;
+            message = `验证失败，还可尝试 ${remaining} 次`;
+        }
+        res.json({ success: false, message });
+    }
 });
 
 // 获取当前登录用户信息（不需要认证，未登录时返回 null）
@@ -621,9 +738,16 @@ app.get('/api/current-user', (req, res) => {
 // 登录API（带 WAF 防暴力破解 + 账户冻结）
 app.post('/api/login', rateLimitLogin, async (req, res) => {
     const { employee_id, password, remember_me } = req.body;
+    const ip = getClientIP(req);
 
     if (!employee_id || !password) {
         return res.status(400).json({ success: false, message: '请输入账号和密码' });
+    }
+    
+    // 检查IP是否被锁定
+    if (isIpLocked(ip)) {
+        logEvent(`IP ${ip} 已锁定，拒绝登录请求`, req);
+        return res.status(403).json({ success: false, message: '您的IP已被临时禁止访问，请联系管理员' });
     }
 
     // 检查是否为异常账号
@@ -2628,6 +2752,34 @@ app.get('/api/monitor/online-count', (req, res) => {
     res.json({ count: userSessions.size });
 });
 
+// ===== 异常IP管理API =====
+// 获取所有锁定IP
+app.get('/api/monitor/locked-ips', (req, res) => {
+    try {
+        const lockedIps = getLockedIps();
+        res.json({ success: true, data: lockedIps });
+    } catch (e) {
+        console.error('获取锁定IP列表错误:', e);
+        res.status(500).json({ success: false, message: '获取失败' });
+    }
+});
+
+// 解锁IP
+app.post('/api/monitor/unlock-ip', (req, res) => {
+    const { ip } = req.body;
+    if (!ip) {
+        return res.status(400).json({ success: false, message: 'IP地址不能为空' });
+    }
+    try {
+        unlockIp(ip);
+        logEvent(`管理员解锁IP: ${ip}`, req);
+        res.json({ success: true, message: 'IP已解锁' });
+    } catch (e) {
+        console.error('解锁IP错误:', e);
+        res.status(500).json({ success: false, message: '解锁失败' });
+    }
+});
+
 // 学生个人仪表盘 API（当前考试的分数、排名、各科雷达图数据）
 app.get('/api/analysis/student-dashboard', requireAuth, async (req, res) => {
     const employee_id = req.session.user.employee_id;
@@ -3776,7 +3928,7 @@ app.get('/api/ai/context', requireAuth, async (req, res) => {
 });
 
 async function buildTeacherContext(user, page, selection) {
-    const classId = user.class_id || selection.class_id;
+    const classId = selection.class_id || user.class_id;
     if (!classId) return buildDefaultTeacherContext(user);
 
     const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);

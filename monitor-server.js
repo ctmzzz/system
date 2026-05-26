@@ -218,32 +218,13 @@ app.delete('/api/backup', async (req, res) => {
         if (!filename) {
             return res.status(400).json({ success: false, error: '请选择备份文件' });
         }
-        const result = await new Promise((resolve, reject) => {
-            const options = {
-                hostname: '127.0.0.1',
-                port: 3001,
-                path: '/api/monitor/backup',
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' }
-            };
-            const reqObj = require('http').request(options, (resObj) => {
-                let data = '';
-                resObj.on('data', chunk => data += chunk);
-                resObj.on('end', () => {
-                    try {
-                        resolve(JSON.parse(data));
-                    } catch (e) {
-                        reject(e);
-                    }
-                });
-            });
-            reqObj.on('error', reject);
-            reqObj.setTimeout(5000, () => { reqObj.destroy(); reject(new Error('timeout')); });
-            reqObj.write(JSON.stringify({ filename }));
-            reqObj.end();
-        });
+        const backupFile = path.join(BACKUP_DIR, filename);
+        if (!fs.existsSync(backupFile)) {
+            return res.status(404).json({ success: false, error: '备份文件不存在' });
+        }
+        fs.unlinkSync(backupFile);
         addLog(`删除备份: ${filename}`, 'info');
-        res.json(result);
+        res.json({ success: true });
     } catch (err) {
         addLog(`删除备份失败: ${err.message}`, 'error');
         res.status(500).json({ success: false, error: err.message });
@@ -279,7 +260,6 @@ function addLog(message, type) {
 // 从主服务器获取数据库状态
 async function fetchMainDbStatus() {
     try {
-        console.log('[DB-STATUS] 正在获取主服务器数据库状态...');
         const dbRes = await new Promise((resolve, reject) => {
             const req = require('http').get('http://127.0.0.1:3001/api/monitor/db-status', (res) => {
                 let data = '';
@@ -290,13 +270,10 @@ async function fetchMainDbStatus() {
             req.setTimeout(1000, () => { req.destroy(); reject(new Error('timeout')); });
         });
         const dbData = JSON.parse(dbRes);
-        console.log('[DB-STATUS] 收到数据:', dbData);
         mainDbConfig.host = dbData.host;
         mainDbConfig.port = dbData.port;
         mainDbConfig.connected = dbData.connected;
-        console.log('[DB-STATUS] 更新后 mainDbConfig:', mainDbConfig);
     } catch (err) {
-        console.error('[DB-STATUS] 获取失败:', err.message);
         mainDbConfig.connected = false;
     }
 }

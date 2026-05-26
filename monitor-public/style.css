@@ -278,6 +278,93 @@ body {
     50% { box-shadow: 0 0 20px rgba(239,68,68,0.2); }
 }
 
+/* IP卡片样式 */
+.ip-icon { color: var(--error); }
+.ip-value { font-size: 28px; font-weight: 700; color: var(--error); }
+
+.ip-card.active {
+    border-color: var(--error);
+    animation: alertGlow 2s infinite;
+}
+
+.ip-list-container {
+    margin-top: 10px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+
+.ip-list-title {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.ip-list {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ip-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+}
+
+.ip-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ip-address {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.ip-details {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.ip-unlock-btn {
+    padding: 6px 12px;
+    background: var(--success);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.ip-unlock-btn:hover {
+    background: #059669;
+}
+
+.toggle-ip-list-btn {
+    padding: 8px 14px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background var(--transition);
+    margin-top: 8px;
+}
+
+.toggle-ip-list-btn:hover {
+    background: var(--accent-hover);
+}
+
 .chart-section {
     background: var(--bg-card);
     border: 1px solid var(--border);
