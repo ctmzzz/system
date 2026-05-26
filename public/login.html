@@ -10,6 +10,11 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            user-select: none;
+        }
+
+        input, textarea {
+            user-select: text;
         }
 
         body {
@@ -1442,6 +1447,7 @@
             let captchaImage = null;
             let initialBtnLeft = 0;
             let captchaCooldownUntil = 0;
+            let captchaRefreshing = false;
             const BLOCK_SIZE = 50;
 
             function showError(message) {
@@ -1462,14 +1468,15 @@
                 slideCaptchaOverlay.classList.remove('show');
             }
 
-            async function generateSlideCaptcha() {
+            async function generateSlideCaptcha(showModal) {
+                if (captchaRefreshing) return;
+                captchaRefreshing = true;
                 try {
                     hideSlideCaptchaOverlay();
                     const res = await fetch('/api/slide-captcha/generate');
                     const data = await res.json();
                     if (data.success) {
-                        console.log('获取验证码数据:', data);
-                        console.log('形状类型:', data.shapeType);
+                        if (showModal) slideCaptchaModal.classList.add('active');
                         slideCaptchaData = data;
                         captchaImage = new Image();
                         captchaImage.crossOrigin = 'anonymous';
@@ -1481,12 +1488,25 @@
                             showSlideCaptchaOverlay('图片加载失败', 'error', 2000);
                         };
                         captchaImage.src = data.imageUrl;
+                    } else if (data.locked) {
+                        closeSlideCaptcha();
+                        showError(data.message);
+                    } else if (data.cooldown) {
+                        captchaCooldownUntil = Date.now() + data.remaining * 1000;
+                        closeSlideCaptcha();
+                        showError(data.message);
                     } else {
                         showSlideCaptchaOverlay('生成验证码失败', 'error', 2000);
                     }
                 } catch (e) {
-                    console.error('获取验证码错误:', e);
-                    showSlideCaptchaOverlay('网络错误', 'error', 2000);
+                    if (showModal) {
+                        closeSlideCaptcha();
+                        showError('网络错误，请稍后重试');
+                    } else {
+                        showSlideCaptchaOverlay('网络错误', 'error', 2000);
+                    }
+                } finally {
+                    captchaRefreshing = false;
                 }
             }
 
@@ -1845,8 +1865,9 @@
             }
 
             function openSlideCaptcha() {
-                slideCaptchaModal.classList.add('active');
-                generateSlideCaptcha();
+                loginBtn.disabled = true;
+                loginBtn.textContent = '验证中...';
+                generateSlideCaptcha(true);
             }
 
             function closeSlideCaptcha() {
@@ -1959,7 +1980,7 @@
 
             // 刷新和关闭
             if (slideCaptchaRefresh) {
-                slideCaptchaRefresh.addEventListener('click', generateSlideCaptcha);
+                slideCaptchaRefresh.addEventListener('click', function() { generateSlideCaptcha(false); });
             }
             if (slideCaptchaCloseX) {
                 slideCaptchaCloseX.addEventListener('click', closeSlideCaptcha);
@@ -1980,13 +2001,8 @@
                     return;
                 }
 
-                loginBtn.disabled = true;
-                loginBtn.textContent = '验证中...';
-                
                 // 保存登录数据，验证成功后使用
                 pendingLoginData = { employee_id, password };
-                
-                // 打开滑动验证
                 openSlideCaptcha();
             }
 

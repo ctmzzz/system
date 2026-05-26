@@ -336,4 +336,12 @@
         kickSession: kickSession,
         showKickModal: showKickModal
     };
+
+    window.addEventListener('pageshow', function(event) {
+        if (event.persisted) {
+            fetch('/api/auth/check').then(function(r) { return r.json(); }).then(function(data) {
+                if (!data.loggedIn) goLogin('bfcache');
+            }).catch(function() {});
+        }
+    });
 })();

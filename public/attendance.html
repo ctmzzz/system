@@ -504,7 +504,7 @@
         }
 
         function logout() {
-            fetch('/api/logout', { method: 'POST' }).then(() => { window.location.href = '/login'; });
+            fetch('/api/logout', { method: 'POST' }).then(() => { window.location.replace('/login'); });
         }
 
         // ===== 修改密码 =====

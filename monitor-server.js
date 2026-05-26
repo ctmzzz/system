@@ -158,6 +158,55 @@ app.get('/api/logs', (req, res) => {
     res.json({ logs: [...serverLogs] });
 });
 
+app.post('/api/logs/clear', (req, res) => {
+    serverLogs = [];
+    addLog('日志已清空', 'info');
+    res.json({ success: true });
+});
+
+app.get('/api/locked-ips', async (req, res) => {
+    try {
+        const result = await new Promise((resolve, reject) => {
+            const req2 = require('http').get(MAIN_SERVER_URL + '/api/monitor/locked-ips', { timeout: 3000 }, (resp) => {
+                let data = '';
+                resp.on('data', chunk => data += chunk);
+                resp.on('end', () => {
+                    try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+                });
+            });
+            req2.on('error', reject);
+            req2.on('timeout', () => { req2.destroy(); reject(new Error('timeout')); });
+        });
+        res.json(result);
+    } catch (err) {
+        res.json({ success: false, data: [] });
+    }
+});
+
+app.post('/api/unlock-ip', (req, res) => {
+    const { ip } = req.body;
+    const postData = JSON.stringify({ ip });
+    const options = {
+        hostname: '127.0.0.1',
+        port: 3001,
+        path: '/api/monitor/unlock-ip',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+        timeout: 3000
+    };
+    const req2 = require('http').request(options, (resp) => {
+        let data = '';
+        resp.on('data', chunk => data += chunk);
+        resp.on('end', () => {
+            try { res.json(JSON.parse(data)); } catch (e) { res.json({ success: false }); }
+        });
+    });
+    req2.on('error', () => res.status(502).json({ success: false, message: '代理请求失败' }));
+    req2.on('timeout', () => { req2.destroy(); res.status(504).json({ success: false, message: '代理请求超时' }); });
+    req2.write(postData);
+    req2.end();
+});
+
 // 主服务器状态
 app.get('/api/server-status', (req, res) => {
     res.json({
@@ -531,23 +580,32 @@ async function getSystemInfo() {
 }
 
 async function updateAbnormalAccounts() {
-    if (!dbPool) return;
     try {
-        const [rows] = await dbPool.query(
-            `SELECT COUNT(*) as count FROM user_logins 
-             WHERE fail_count >= 5 AND last_fail_time > DATE_SUB(NOW(), INTERVAL 1 HOUR)`
-        );
-        abnormalAccountsCount = rows[0].count || 0;
-        attackDetected = abnormalAccountsCount > 0;
+        const result = await new Promise((resolve, reject) => {
+            const req = require('http').get(MAIN_SERVER_URL + '/api/monitor/locked-ips', { timeout: 3000 }, (resp) => {
+                let data = '';
+                resp.on('data', chunk => data += chunk);
+                resp.on('end', () => {
+                    try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+                });
+            });
+            req.on('error', reject);
+            req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+        });
+        if (result.success && result.data && Array.isArray(result.data)) {
+            abnormalAccountsCount = result.data.length;
+            attackDetected = abnormalAccountsCount > 0;
+            io.emit('locked_ips', result.data);
+        }
     } catch (err) {}
 }
 
 function classifyLog(line, source) {
     let type = 'info';
-    if (source === 'error' || /error|错误|fail|失败|exception/i.test(line)) {
-        type = 'error';
-    } else if (/warn|警告/i.test(line)) {
+    if (/warn|警告|安全/i.test(line)) {
         type = 'warning';
+    } else if (source === 'error' || /error|错误|fail|失败|exception/i.test(line)) {
+        type = 'error';
     } else if (/success|成功|ok|完成/i.test(line)) {
         type = 'success';
     }

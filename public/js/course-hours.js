@@ -20,7 +20,7 @@ async function checkAuth() {
 
 async function logout() {
     try { await fetch('/api/logout', { method: 'POST' }); } catch (err) {}
-    window.location.href = '/login';
+    window.location.replace('/login');
 }
 
 function showToast(message, type) {

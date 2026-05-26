@@ -48,7 +48,7 @@ async function checkAuth() {
 
         return data.user;
     } catch (err) {
-        window.location.href = '/login';
+        window.location.replace('/login');
         return null;
     }
 }
@@ -66,7 +66,7 @@ async function logout() {
     } catch (e) {}
     localStorage.removeItem('sidebarUserAvatar');
     localStorage.removeItem('sidebarUserName');
-    window.location.href = '/login';
+    window.location.replace('/login');
 }
 
 // 班级角色：隐藏除美丽学分外的所有导航项

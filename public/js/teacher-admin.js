@@ -26,10 +26,8 @@ async function checkAuth() {
 async function logout() {
     try {
         await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login';
-    } catch (err) {
-        window.location.href = '/login';
-    }
+    } catch (err) {}
+    window.location.replace('/login');
 }
 
 // Toast 提示

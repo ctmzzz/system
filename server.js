@@ -404,10 +404,10 @@ function clearAccountFailed(employee_id) {
 }
 
 // ===== IP跟踪和锁定机制 =====
-const ipAttempts = new Map(); // ip -> { captchaFails: 0, cooldownUntil: 0, locked: false, lockTime: 0, reason: '' }
-const CAPTCHA_FAIL_COOLDOWN_THRESHOLD = 5; // 5次失败后进入冷却
-const CAPTCHA_FAIL_LOCK_THRESHOLD = 10; // 10次失败后锁定IP
-const COOLDOWN_TIME_MS = 10 * 60 * 1000; // 10分钟冷却
+const ipAttempts = new Map(); // ip -> { totalFails, captchaFails, cooldownUntil, locked, lockTime, reason }
+const CAPTCHA_FAIL_COOLDOWN_THRESHOLD = 5; // 5次失败后进入冷却（单轮）
+const CAPTCHA_FAIL_LOCK_THRESHOLD = 10; // 累计10次失败后锁定IP
+const COOLDOWN_TIME_MS = 10 * 1000; // 10秒冷却
 
 function getClientIP(req) {
     return req.ip || 
@@ -418,7 +418,7 @@ function getClientIP(req) {
 
 function getIpRecord(ip) {
     if (!ipAttempts.has(ip)) {
-        ipAttempts.set(ip, { captchaFails: 0, cooldownUntil: 0, locked: false, lockTime: 0, reason: '' });
+        ipAttempts.set(ip, { totalFails: 0, captchaFails: 0, cooldownUntil: 0, locked: false, lockTime: 0, reason: '' });
     }
     return ipAttempts.get(ip);
 }
@@ -435,26 +435,33 @@ function isIpInCooldown(ip) {
 
 function recordCaptchaFailed(ip) {
     const record = getIpRecord(ip);
+    if (record.cooldownUntil > 0 && Date.now() >= record.cooldownUntil) {
+        record.captchaFails = 0;
+        record.cooldownUntil = 0;
+    }
     record.captchaFails++;
+    record.totalFails = (record.totalFails || 0) + 1;
     
-    if (record.captchaFails >= CAPTCHA_FAIL_LOCK_THRESHOLD) {
+    if (record.totalFails >= CAPTCHA_FAIL_LOCK_THRESHOLD) {
         record.locked = true;
         record.lockTime = Date.now();
-        record.reason = '连续验证码验证失败次数过多';
+        record.lockFailCount = record.totalFails;
+        record.reason = '累计验证码验证失败次数过多';
+        console.log('[安全] IP已锁定(' + record.totalFails + '次累计失败): ' + ip + ' 原因: ' + record.reason);
         record.captchaFails = 0;
-        console.log('[安全] IP已锁定: ' + ip + ' 原因: ' + record.reason);
+        record.totalFails = 0;
+        record.cooldownUntil = 0;
     } else if (record.captchaFails >= CAPTCHA_FAIL_COOLDOWN_THRESHOLD) {
         record.cooldownUntil = Date.now() + COOLDOWN_TIME_MS;
-        record.captchaFails = 0;
-        console.log('[安全] IP进入冷却: ' + ip + ' 冷却结束: ' + new Date(record.cooldownUntil).toLocaleString());
+        console.log('[安全] IP进入冷却(' + record.captchaFails + '/' + record.totalFails + '次失败): ' + ip + ' 冷却结束: ' + new Date(record.cooldownUntil).toLocaleString());
     }
 }
 
 function recordCaptchaSuccess(ip) {
     const record = getIpRecord(ip);
-    // 验证成功重置失败计数，但如果已锁定则不解锁
     if (!record.locked) {
         record.captchaFails = 0;
+        record.totalFails = 0;
         record.cooldownUntil = 0;
     }
 }
@@ -463,6 +470,7 @@ function unlockIp(ip) {
     const record = getIpRecord(ip);
     record.locked = false;
     record.captchaFails = 0;
+    record.totalFails = 0;
     record.cooldownUntil = 0;
     record.lockTime = 0;
     record.reason = '';
@@ -477,7 +485,7 @@ function getLockedIps() {
                 ip: ip,
                 lockTime: record.lockTime,
                 reason: record.reason,
-                captchaFails: record.captchaFails
+                captchaFails: record.lockFailCount || CAPTCHA_FAIL_LOCK_THRESHOLD
             });
         }
     }
@@ -611,6 +619,9 @@ function servePage(pagePath, htmlFile) {
         if (!ROLE_PAGES[role] || !ROLE_PAGES[role].includes(pagePath)) {
             return res.redirect(getDefaultPage(role));
         }
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
         res.sendFile(path.join(__dirname, 'public', htmlFile));
     }];
 }
@@ -678,6 +689,18 @@ app.get('/login', (req, res) => {
 // 获取滑动验证码
 app.get('/api/slide-captcha/generate', (req, res) => {
     try {
+        const ip = getClientIP(req);
+
+        if (isIpLocked(ip)) {
+            return res.status(403).json({ success: false, locked: true, message: '您的IP已被临时禁止访问，请联系管理员' });
+        }
+
+        if (isIpInCooldown(ip)) {
+            const record = getIpRecord(ip);
+            const remaining = Math.ceil((record.cooldownUntil - Date.now()) / 1000);
+            return res.status(429).json({ success: false, cooldown: true, remaining: remaining, message: '验证失败次数过多，请等待 ' + remaining + ' 秒后重试' });
+        }
+
         const captcha = generateSlideCaptcha();
         const imageName = path.basename(captcha.imagePath);
         res.json({ 
@@ -753,7 +776,7 @@ app.get('/api/current-user', (req, res) => {
 
 // 登录API（带 WAF 防暴力破解 + 账户冻结）
 app.post('/api/login', rateLimitLogin, async (req, res) => {
-    const { employee_id, password, remember_me } = req.body;
+    const { employee_id, password, remember_me = false } = req.body;
     const ip = getClientIP(req);
 
     if (!employee_id || !password) {

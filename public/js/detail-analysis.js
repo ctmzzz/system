@@ -34,7 +34,7 @@ async function checkAuth() {
 
 async function logout() {
     await fetch('/api/logout', { method: 'POST' });
-    window.location.href = '/login';
+    window.location.replace('/login');
 }
 
 function printDetail() {

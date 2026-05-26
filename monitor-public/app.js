@@ -280,6 +280,49 @@ function initSocket() {
     socket.on('logs_history', (logs) => {
         if (logWorker) logWorker.postMessage({ type: 'logs_history', data: logs });
     });
+    socket.on('locked_ips', (ips) => {
+        updateIpList(ips);
+    });
+}
+
+function updateIpList(ips) {
+    const countEl = document.getElementById('ipCount');
+    const listEl = document.getElementById('ipList');
+    const cardEl = document.getElementById('ipCard');
+    const alertCountEl = document.getElementById('alertValue');
+    const arr = ips || [];
+    countEl.textContent = arr.length;
+    alertCountEl.textContent = arr.length;
+    if (arr.length > 0) {
+        cardEl.classList.add('active');
+    } else {
+        cardEl.classList.remove('active');
+    }
+    if (arr.length > 0) {
+        listEl.innerHTML = arr.map(ip => `
+            <div class="ip-item">
+                <div class="ip-item-info">
+                    <div class="ip-address">${ip.ip}</div>
+                    <div class="ip-details">
+                        原因: ${ip.reason || '未知'} | 
+                        失败: ${ip.captchaFails || 0}次 | 
+                        时间: ${new Date(ip.lockTime).toLocaleString()}
+                    </div>
+                </div>
+                <button class="ip-unlock-btn" data-ip="${ip.ip}">解锁</button>
+            </div>
+        `).join('');
+        listEl.querySelectorAll('.ip-unlock-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const ip = e.target.dataset.ip;
+                if (confirm(`确定要解锁IP: ${ip} 吗？`)) {
+                    await unlockIp(ip);
+                }
+            });
+        });
+    } else {
+        listEl.innerHTML = '';
+    }
 }
 
 function updateSystemInfo(data) {
@@ -512,7 +555,10 @@ function initAutoScrollBtn() {
 }
 
 function initClearBtn() {
-    document.getElementById('clearLogsBtn').addEventListener('click', () => {
+    document.getElementById('clearLogsBtn').addEventListener('click', async () => {
+        try {
+            await fetch('/api/logs/clear', { method: 'POST' });
+        } catch (e) {}
         allLogs = [];
         pendingRenderLogs = [];
         document.getElementById('logsContainer').innerHTML = '';
@@ -543,68 +589,18 @@ function initIpManagement() {
 // 加载锁定IP列表
 async function loadLockedIps() {
     try {
-        // 调用主服务器的API获取锁定IP
-        const res = await fetch('http://127.0.0.1:3001/api/monitor/locked-ips');
+        const res = await fetch('/api/locked-ips');
         const data = await res.json();
-        
         if (data.success) {
-            const ips = data.data || [];
-            const countEl = document.getElementById('ipCount');
-            const listEl = document.getElementById('ipList');
-            const cardEl = document.getElementById('ipCard');
-            const alertCountEl = document.getElementById('alertValue');
-            
-            // 更新IP计数
-            countEl.textContent = ips.length;
-            
-            // 更新安全告警计数（异常IP数量算入告警）
-            alertCountEl.textContent = ips.length;
-            
-            // 更新卡片状态
-            if (ips.length > 0) {
-                cardEl.classList.add('active');
-            } else {
-                cardEl.classList.remove('active');
-            }
-            
-            // 渲染IP列表
-            if (ips.length > 0) {
-                listEl.innerHTML = ips.map(ip => `
-                    <div class="ip-item">
-                        <div class="ip-item-info">
-                            <div class="ip-address">${ip.ip}</div>
-                            <div class="ip-details">
-                                原因: ${ip.reason || '未知'} | 
-                                失败: ${ip.captchaFails || 0}次 | 
-                                时间: ${new Date(ip.lockTime).toLocaleString()}
-                            </div>
-                        </div>
-                        <button class="ip-unlock-btn" data-ip="${ip.ip}">解锁</button>
-                    </div>
-                `).join('');
-                
-                // 绑定解锁按钮事件
-                listEl.querySelectorAll('.ip-unlock-btn').forEach(btn => {
-                    btn.addEventListener('click', async (e) => {
-                        const ip = e.target.dataset.ip;
-                        if (confirm(`确定要解锁IP: ${ip} 吗？`)) {
-                            await unlockIp(ip);
-                        }
-                    });
-                });
-            } else {
-                listEl.innerHTML = '<div style="color:#64748b;font-size:12px;padding:10px;">暂无锁定IP</div>';
-            }
+            updateIpList(data.data || []);
         }
-    } catch (err) {
-        console.error('加载锁定IP列表失败:', err);
-    }
+    } catch (err) {}
 }
 
 // 解锁IP
 async function unlockIp(ip) {
     try {
-        const res = await fetch('http://127.0.0.1:3001/api/monitor/unlock-ip', {
+        const res = await fetch('/api/unlock-ip', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ip: ip })
