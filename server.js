@@ -335,17 +335,27 @@ function generateSlideCaptcha() {
     }
     
     const imagePath = checkImages[Math.floor(Math.random() * checkImages.length)];
-    // 生成百分比坐标（相对于图片尺寸）
     const targetXPercent = Math.floor(Math.random() * 40) + 30; // X轴：30%-70%
     const targetYPercent = Math.floor(Math.random() * 40) + 30; // Y轴：30%-70%
-    const shapeType = Math.floor(Math.random() * 10); // 10种不同形状
+    const shapeType = Math.floor(Math.random() * 10);
+
+    // 生成干扰缺口：X/Y均不与正确缺口重叠（差≥20%）
+    let decoyXPercent, decoyYPercent;
+    do {
+        decoyXPercent = Math.floor(Math.random() * 40) + 30;
+        decoyYPercent = Math.floor(Math.random() * 40) + 30;
+    } while (Math.abs(decoyXPercent - targetXPercent) < 20 || Math.abs(decoyYPercent - targetYPercent) < 20);
+    const decoyShapeType = Math.floor(Math.random() * 10);
     
     const token = crypto.randomBytes(16).toString('hex');
     captchaStore.set(token, { 
         answer: targetXPercent, 
         expires: Date.now() + CAPTCHA_EXPIRE_MS,
         yPercent: targetYPercent,
-        shapeType: shapeType
+        shapeType: shapeType,
+        decoyXPercent: decoyXPercent,
+        decoyYPercent: decoyYPercent,
+        decoyShapeType: decoyShapeType
     });
     
     return { 
@@ -353,7 +363,10 @@ function generateSlideCaptcha() {
         imagePath, 
         targetXPercent, 
         targetYPercent,
-        shapeType: shapeType
+        shapeType: shapeType,
+        decoyXPercent: decoyXPercent,
+        decoyYPercent: decoyYPercent,
+        decoyShapeType: decoyShapeType
     };
 }
 
@@ -673,7 +686,10 @@ app.get('/api/slide-captcha/generate', (req, res) => {
             imageUrl: '/check/' + imageName,
             targetXPercent: captcha.targetXPercent,
             targetYPercent: captcha.targetYPercent,
-            shapeType: captcha.shapeType
+            shapeType: captcha.shapeType,
+            decoyXPercent: captcha.decoyXPercent,
+            decoyYPercent: captcha.decoyYPercent,
+            decoyShapeType: captcha.decoyShapeType
         });
     } catch (e) {
         res.status(500).json({ success: false, message: '生成验证码失败' });
@@ -3907,6 +3923,8 @@ app.get('/api/ai/context', requireAuth, async (req, res) => {
         const selection = req.query;
         let contextText = '';
 
+        console.log(`[AI] 📋 获取上下文 → 账号: ${user.name}(${user.employee_id}), 角色: ${role}, 页面: ${page}`);
+
         if (role === 'teacher') {
             contextText = await buildTeacherContext(user, page, selection);
         } else if (role === 'student') {
@@ -5697,6 +5715,10 @@ app.post('/api/ollama/chat', async (req, res) => {
         const { model, messages, stream } = req.body;
         const apiKey = 'sk-79d6dec0d9704699be000aa0d14d5b55';
         const qwenHost = 'dashscope.aliyuncs.com';
+
+        const user = req.session && req.session.user;
+        const userLabel = user ? `${user.name}(${user.employee_id})[${user.role}]` : '未知用户';
+        console.log(`[AI] 💬 开始对话 → 账号: ${userLabel}, 模型: ${model || 'qwen-max'}`);
         
         let headersSent = false;
         let connectionClosed = false;
@@ -6092,6 +6114,179 @@ async function startServer() {
             res.status(500).json({ success: false, error: err.message });
         }
     });
+
+    // 监控用：系统资源信息（供远程monitor拉取）
+    const monitorLogs = [];
+    const MAX_MONITOR_LOGS = 200;
+    let _monitorLastCpuUsage = process.cpuUsage();
+    let _monitorLastCpuTime = 0;
+    let _monitorLastNetworkStats = {};
+    let _monitorLastNetworkTime = 0;
+
+    function addMonitorLog(message, type) {
+        const time = new Date().toISOString();
+        monitorLogs.push({ id: Date.now() + Math.random(), time, message: `[${new Date().toLocaleString('zh-CN')}] ${message}`, type: type || 'info', source: 'main' });
+        if (monitorLogs.length > MAX_MONITOR_LOGS) monitorLogs.shift();
+    }
+
+    function getNetworkUsage() {
+        try {
+            const os = require('os');
+            const ifaces = os.networkInterfaces();
+            let totalRx = 0, totalTx = 0;
+            
+            // 用wmic获取网络使用率
+            const { execSync } = require('child_process');
+            try {
+                const result = execSync('wmic path Win32_PerfRawData_Tcpip_NetworkInterface get BytesReceivedPersec,BytesSentPersec', { timeout: 2000, windowsHide: true }).toString();
+                const lines = result.trim().split('\n');
+                if (lines.length >= 2) {
+                    const values = lines[1].trim().split(/\s+/).map(v => parseInt(v) || 0);
+                    totalRx = values[0] || 0;
+                    totalTx = values[1] || 0;
+                }
+            } catch (e) {}
+
+            const now = Date.now();
+            let networkStats = null;
+            if (_monitorLastNetworkTime > 0 && Object.keys(_monitorLastNetworkStats).length > 0) {
+                const elapsed = (now - _monitorLastNetworkTime) / 1000;
+                if (elapsed > 0) {
+                    const rxDiff = totalRx - (_monitorLastNetworkStats.rx || 0);
+                    const txDiff = totalTx - (_monitorLastNetworkStats.tx || 0);
+                    networkStats = {
+                        rx: parseFloat((rxDiff / elapsed / 1024).toFixed(1)),
+                        tx: parseFloat((txDiff / elapsed / 1024).toFixed(1))
+                    };
+                }
+            }
+            _monitorLastNetworkStats = { rx: totalRx, tx: totalTx };
+            _monitorLastNetworkTime = now;
+            return networkStats;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    app.get('/api/monitor/system-info', (req, res) => {
+        try {
+            const os = require('os');
+            const { execSync } = require('child_process');
+
+            const cpus = os.cpus();
+            const cpuModel = cpus[0] ? cpus[0].model : 'Unknown';
+            const cpuCores = cpus.length;
+
+            let cpuUsage = 0;
+            if (_monitorLastCpuTime > 0) {
+                const elapsed = Date.now() - _monitorLastCpuTime;
+                const cpuDiff = process.cpuUsage(_monitorLastCpuUsage);
+                cpuUsage = elapsed > 0 ? parseFloat(((cpuDiff.user + cpuDiff.system) / (elapsed * 1000)).toFixed(1)) : 0;
+            }
+            _monitorLastCpuUsage = process.cpuUsage();
+            _monitorLastCpuTime = Date.now();
+
+            const totalMem = os.totalmem();
+            const freeMem = os.freemem();
+
+            let diskInfo = null;
+            try {
+                const result = execSync('wmic logicaldisk where "Caption=\'C:\'" get size,freespace /format:csv', { timeout: 3000, windowsHide: true }).toString();
+                const lines = result.trim().split('\n');
+                if (lines.length >= 2) {
+                    const cols = lines[1].split(',');
+                    const size = parseInt(cols[1]);
+                    const free = parseInt(cols[2]);
+                    if (size > 0) {
+                        diskInfo = {
+                            total: (size / 1024 / 1024 / 1024).toFixed(2),
+                            free: (free / 1024 / 1024 / 1024).toFixed(2),
+                            used: ((size - free) / 1024 / 1024 / 1024).toFixed(2),
+                            usage: parseFloat(((size - free) / size * 100).toFixed(1))
+                        };
+                    }
+                }
+            } catch (e) {}
+
+            const memUsageProc = process.memoryUsage();
+            const networkStats = getNetworkUsage();
+
+            res.json({
+                success: true,
+                data: {
+                    timestamp: Date.now(),
+                    dbHost: DB_CONFIG.host,
+                    dbPort: DB_CONFIG.port,
+                    dbConnected: true,
+                    onlineUsers: userSessions.size,
+                    abnormalAccountsCount: lockedIPs.size,
+                    attackDetected: lockedIPs.size > 0,
+                    cpu: { 
+                        model: cpuModel, 
+                        cores: cpuCores, 
+                        usage: Math.max(0, Math.min(100, cpuUsage * 100))
+                    },
+                    memory: {
+                        total: parseFloat((totalMem / 1024 / 1024 / 1024).toFixed(2)),
+                        free: parseFloat((freeMem / 1024 / 1024 / 1024).toFixed(2)),
+                        used: parseFloat(((totalMem - freeMem) / 1024 / 1024 / 1024).toFixed(2)),
+                        usage: parseFloat(((totalMem - freeMem) / totalMem * 100).toFixed(1))
+                    },
+                    disk: diskInfo,
+                    network: networkStats,
+                    os: { hostname: os.hostname(), platform: os.platform(), uptime: os.uptime() },
+                    process: {
+                        uptime: parseFloat((process.uptime() / 3600).toFixed(2)),
+                        cpu: Math.max(0, Math.min(100, cpuUsage * 100)),
+                        memory: {
+                            rss: parseFloat((memUsageProc.rss / 1024 / 1024).toFixed(1)),
+                            heapUsed: parseFloat((memUsageProc.heapUsed / 1024 / 1024).toFixed(1)),
+                            heapTotal: parseFloat((memUsageProc.heapTotal / 1024 / 1024).toFixed(1))
+                        }
+                    }
+                }
+            });
+        } catch (err) {
+            res.json({ success: false, error: err.message });
+        }
+    });
+
+    // 监控用：主服务器日志（支持增量拉取）
+    app.get('/api/monitor/logs', (req, res) => {
+        const sinceId = req.query.since_id ? parseFloat(req.query.since_id) : 0;
+        const newLogs = monitorLogs.filter(log => log.id > sinceId);
+        res.json({ success: true, logs: newLogs });
+    });
+
+    // 监控用：停止主服务器
+    app.post('/api/monitor/shutdown', (req, res) => {
+        res.json({ success: true, message: '正在关闭主服务器...' });
+        addMonitorLog('收到远程关闭请求', 'warn');
+        setTimeout(() => {
+            process.exit(0);
+        }, 500);
+    });
+
+    // 重写console.log以捕获日志
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.log = function() {
+        const msg = Array.from(arguments).join(' ');
+        addMonitorLog(msg, 'info');
+        originalLog.apply(console, arguments);
+    };
+    console.error = function() {
+        const msg = Array.from(arguments).join(' ');
+        addMonitorLog(msg, 'error');
+        originalError.apply(console, arguments);
+    };
+    console.warn = function() {
+        const msg = Array.from(arguments).join(' ');
+        addMonitorLog(msg, 'warning');
+        originalWarn.apply(console, arguments);
+    };
 
     // ===== 全局错误处理（防崩溃，放最后）=====
     app.use((err, req, res, next) => {

@@ -941,6 +941,7 @@
         }
 
         .slide-captcha-box {
+            position: relative;
             background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(2, 6, 23, 0.98));
             border-radius: 16px;
             padding: 24px;
@@ -948,6 +949,30 @@
             max-width: 90%;
             border: 1px solid rgba(56, 189, 248, 0.2);
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .slide-captcha-close-x {
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            cursor: pointer;
+            color: rgba(148, 163, 184, 0.6);
+            font-size: 18px;
+            line-height: 1;
+            transition: all 0.3s;
+            z-index: 5;
+            user-select: none;
+        }
+
+        .slide-captcha-close-x:hover {
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.15);
         }
 
         .slide-captcha-title {
@@ -1040,65 +1065,61 @@
             height: 24px;
         }
 
-        .slide-captcha-actions {
-            display: flex;
-            gap: 12px;
-        }
-
-        .slide-captcha-btn-refresh,
-        .slide-captcha-btn-close {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .slide-captcha-btn-refresh {
-            background: rgba(56, 189, 248, 0.2);
-            color: #22d1ee;
-            border: 1px solid rgba(34, 211, 238, 0.3);
-        }
-
-        .slide-captcha-btn-refresh:hover {
-            background: rgba(56, 189, 248, 0.3);
-        }
-
-        .slide-captcha-btn-close {
-            background: rgba(248, 113, 113, 0.2);
-            color: #f87171;
-            border: 1px solid rgba(248, 113, 113, 0.3);
-        }
-
-        .slide-captcha-btn-close:hover {
-            background: rgba(248, 113, 113, 0.3);
-        }
-
-        .slide-captcha-error {
-            color: #f87171;
-            text-align: center;
+        .slide-captcha-refresh {
+            display: inline-block;
+            color: rgba(148, 163, 184, 0.6);
             font-size: 13px;
-            margin-top: 8px;
-            display: none;
-        }
-
-        .slide-captcha-error.show {
-            display: block;
-        }
-
-        .slide-captcha-success {
-            color: #22d3ee;
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.3s;
             text-align: center;
-            font-size: 15px;
-            font-weight: bold;
-            margin-top: 12px;
-            display: none;
+            width: 100%;
+            margin-top: 2px;
         }
 
-        .slide-captcha-success.show {
-            display: block;
+        .slide-captcha-refresh:hover {
+            color: #22d1ee;
+        }
+
+        .slide-captcha-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            z-index: 3;
+            visibility: hidden;
+        }
+
+        .slide-captcha-overlay.show {
+            visibility: visible;
+        }
+
+        .slide-captcha-overlay.error.show {
+            background: rgba(15, 23, 42, 0.7);
+        }
+
+        .slide-captcha-overlay.success.show {
+            background: rgba(15, 23, 42, 0.7);
+        }
+
+        .slide-captcha-overlay .overlay-text {
+            font-size: 16px;
+            font-weight: 600;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        .slide-captcha-overlay.error .overlay-text {
+            color: #f87171;
+        }
+
+        .slide-captcha-overlay.success .overlay-text {
+            color: #4ade80;
         }
     </style>
     <script>
@@ -1409,9 +1430,9 @@
             const slideCaptchaBtn = document.getElementById('slideCaptchaBtn');
             const slideCaptchaProgress = document.getElementById('slideCaptchaProgress');
             const slideCaptchaRefresh = document.getElementById('slideCaptchaRefresh');
-            const slideCaptchaClose = document.getElementById('slideCaptchaClose');
-            const slideCaptchaError = document.getElementById('slideCaptchaError');
-            const slideCaptchaSuccess = document.getElementById('slideCaptchaSuccess');
+            const slideCaptchaCloseX = document.getElementById('slideCaptchaCloseX');
+            const slideCaptchaOverlay = document.getElementById('slideCaptchaOverlay');
+            const slideCaptchaOverlayText = document.getElementById('slideCaptchaOverlayText');
 
             let slideCaptchaData = null;
             let isDragging = false;
@@ -1419,6 +1440,8 @@
             let currentX = 0;
             let pendingLoginData = null;
             let captchaImage = null;
+            let initialBtnLeft = 0;
+            let captchaCooldownUntil = 0;
             const BLOCK_SIZE = 50;
 
             function showError(message) {
@@ -1427,20 +1450,21 @@
                 setTimeout(() => errorMessage.classList.remove('visible'), 3500);
             }
 
-            function showSlideCaptchaError(message) {
-                slideCaptchaError.textContent = message;
-                slideCaptchaError.classList.add('show');
-                setTimeout(() => slideCaptchaError.classList.remove('show'), 2000);
+            function showSlideCaptchaOverlay(message, type, duration) {
+                slideCaptchaOverlayText.textContent = message;
+                slideCaptchaOverlay.className = 'slide-captcha-overlay ' + type + ' show';
+                if (duration) {
+                    setTimeout(() => slideCaptchaOverlay.classList.remove('show'), duration);
+                }
             }
 
-            function showSlideCaptchaSuccess(message) {
-                slideCaptchaSuccess.textContent = message;
-                slideCaptchaSuccess.classList.add('show');
+            function hideSlideCaptchaOverlay() {
+                slideCaptchaOverlay.classList.remove('show');
             }
 
             async function generateSlideCaptcha() {
                 try {
-                    slideCaptchaSuccess.classList.remove('show');
+                    hideSlideCaptchaOverlay();
                     const res = await fetch('/api/slide-captcha/generate');
                     const data = await res.json();
                     if (data.success) {
@@ -1454,15 +1478,15 @@
                             resetSlider();
                         };
                         captchaImage.onerror = function() {
-                            showSlideCaptchaError('图片加载失败');
+                            showSlideCaptchaOverlay('图片加载失败', 'error', 2000);
                         };
                         captchaImage.src = data.imageUrl;
                     } else {
-                        showSlideCaptchaError('生成验证码失败');
+                        showSlideCaptchaOverlay('生成验证码失败', 'error', 2000);
                     }
                 } catch (e) {
                     console.error('获取验证码错误:', e);
-                    showSlideCaptchaError('网络错误');
+                    showSlideCaptchaOverlay('网络错误', 'error', 2000);
                 }
             }
 
@@ -1509,28 +1533,34 @@
                 const actualTargetX = drawX + targetXOnImage * scaleX;
                 const actualTargetY = drawY + targetYOnImage * scaleY;
 
-                // 在背景图上挖缺口（绘制目标位置的白色镂空效果）
+                // 在背景图上挖缺口
                 ctx.save();
                 ctx.globalCompositeOperation = 'destination-out';
                 ctx.fillStyle = 'rgba(0, 0, 0, 1)';
-                drawPuzzlePiece(ctx, actualTargetX, actualTargetY);
+                drawPuzzlePiece(ctx, actualTargetX, actualTargetY, false, slideCaptchaData.shapeType);
                 ctx.restore();
 
-                // 绘制目标位置的边框
-                ctx.save();
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                ctx.lineWidth = 2;
-                drawPuzzlePiece(ctx, actualTargetX, actualTargetY, true);
-                ctx.restore();
+                // 绘制干扰缺口
+                if (slideCaptchaData.decoyYPercent !== undefined) {
+                    const decoyXOnImage = (slideCaptchaData.decoyXPercent / 100) * captchaImage.width;
+                    const decoyYOnImage = (slideCaptchaData.decoyYPercent / 100) * captchaImage.height;
+                    const actualDecoyX = drawX + decoyXOnImage * scaleX;
+                    const actualDecoyY = drawY + decoyYOnImage * scaleY;
+
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+                    drawPuzzlePiece(ctx, actualDecoyX, actualDecoyY, false, slideCaptchaData.decoyShapeType);
+                    ctx.restore();
+                }
 
                 // 绘制滑块图片
                 blockCtx.clearRect(0, 0, BLOCK_SIZE, BLOCK_SIZE);
                 blockCtx.save();
                 blockCtx.beginPath();
-                drawPuzzlePiecePath(blockCtx, BLOCK_SIZE/2, BLOCK_SIZE/2);
+                drawPuzzlePiecePath(blockCtx, BLOCK_SIZE/2, BLOCK_SIZE/2, slideCaptchaData.shapeType);
                 blockCtx.closePath();
                 blockCtx.clip();
-                // 计算滑块图片在原图中的位置
                 const srcX = targetXOnImage - (BLOCK_SIZE / 2 / scaleX);
                 const srcY = targetYOnImage - (BLOCK_SIZE / 2 / scaleY);
                 const srcW = BLOCK_SIZE / scaleX;
@@ -1542,20 +1572,18 @@
                 );
                 blockCtx.restore();
 
-                // 绘制滑块边框
                 blockCtx.save();
                 blockCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
                 blockCtx.lineWidth = 2;
-                drawPuzzlePiece(blockCtx, BLOCK_SIZE/2, BLOCK_SIZE/2, true);
+                drawPuzzlePiecePath(blockCtx, BLOCK_SIZE/2, BLOCK_SIZE/2, slideCaptchaData.shapeType);
+                blockCtx.stroke();
                 blockCtx.restore();
 
-                // 设置滑块的初始位置
                 slideCaptchaBlock.style.top = (actualTargetY - BLOCK_SIZE/2) + 'px';
             }
 
-            // 绘制拼图块形状
-            function drawPuzzlePiece(ctx, centerX, centerY, isStroke = false) {
-                drawPuzzlePiecePath(ctx, centerX, centerY);
+            function drawPuzzlePiece(ctx, centerX, centerY, isStroke, shapeType) {
+                drawPuzzlePiecePath(ctx, centerX, centerY, shapeType);
                 if (isStroke) {
                     ctx.stroke();
                 } else {
@@ -1563,13 +1591,11 @@
                 }
             }
 
-            function drawPuzzlePiecePath(ctx, centerX, centerY) {
+            function drawPuzzlePiecePath(ctx, centerX, centerY, shapeType) {
                 const r = 12;
                 const l = BLOCK_SIZE;
                 const halfL = l / 2;
-                const shapeType = slideCaptchaData ? slideCaptchaData.shapeType : 0;
-                
-                // 清除路径
+
                 ctx.beginPath();
                 
                 switch (shapeType) {
@@ -1779,8 +1805,9 @@
                 if (!captchaImage) return;
                 
                 const bounds = getImageAreaBounds();
-                currentX = 2;
-                slideCaptchaBtn.style.left = '2px';
+                initialBtnLeft = 0;
+                currentX = initialBtnLeft;
+                slideCaptchaBtn.style.left = initialBtnLeft + 'px';
                 slideCaptchaProgress.style.left = '0px';
                 slideCaptchaProgress.style.width = '0';
                 
@@ -1810,9 +1837,11 @@
                 const actualTargetX = drawX + targetXOnImage * scaleX;
                 const actualTargetY = drawY + targetYOnImage * scaleY;
                 
-                slideCaptchaBlock.style.left = (bounds.left - BLOCK_SIZE/2) + 'px';
+                slideCaptchaBlock.style.left = (0 - BLOCK_SIZE / 2) + 'px';
                 slideCaptchaBlock.style.top = (actualTargetY - BLOCK_SIZE/2) + 'px';
                 slideCaptchaBlock.style.display = 'block';
+                slideCaptchaBlock.style.boxShadow = '';
+                slideCaptchaBlock.style.transition = 'none';
             }
 
             function openSlideCaptcha() {
@@ -1840,9 +1869,9 @@
                 const bounds = getImageAreaBounds();
                 const sliderWidth = slideCaptchaBtn.parentElement.clientWidth;
                 const sliderMax = sliderWidth - 44;
-                let moveX = clientX - startX + 2;
+                let moveX = clientX - startX + initialBtnLeft;
                 
-                if (moveX < 2) moveX = 2;
+                if (moveX < initialBtnLeft) moveX = initialBtnLeft;
                 if (moveX > sliderMax) moveX = sliderMax;
                 
                 currentX = moveX;
@@ -1850,7 +1879,7 @@
                 slideCaptchaProgress.style.left = '0px';
                 slideCaptchaProgress.style.width = moveX + 'px';
                 
-                const ratio = (moveX - 2) / (sliderMax - 2);
+                const ratio = (moveX - initialBtnLeft) / (sliderMax - initialBtnLeft);
                 const blockLeft = bounds.left + ratio * bounds.width - BLOCK_SIZE / 2;
                 slideCaptchaBlock.style.left = blockLeft + 'px';
             }
@@ -1865,7 +1894,7 @@
                 
                 const sliderWidth = slideCaptchaBtn.parentElement.clientWidth;
                 const sliderMax = sliderWidth - 44;
-                const sliderRatio = (currentX - 2) / (sliderMax - 2);
+                const sliderRatio = (currentX - initialBtnLeft) / (sliderMax - initialBtnLeft);
                 const userXPercent = sliderRatio * 100;
                 
                 const bounds = getImageAreaBounds();
@@ -1887,12 +1916,8 @@
                         const actualTargetX = bounds.left + targetXOnImage * scaleX - BLOCK_SIZE / 2;
                         slideCaptchaBlock.style.transition = 'left 0.3s ease';
                         slideCaptchaBlock.style.left = actualTargetX + 'px';
-                        
-                        // 绿色成功效果
-                        slideCaptchaBlock.style.boxShadow = '0 0 10px rgba(34, 211, 238, 0.8), 0 2px 10px rgba(0, 0, 0, 0.4)';
-                        
-                        // 显示验证成功提示
-                        showSlideCaptchaSuccess('验证成功！正在登录...');
+
+                        showSlideCaptchaOverlay('验证成功，正在登录...', 'success');
                         
                         // 1秒后关闭并登录
                         setTimeout(() => {
@@ -1900,14 +1925,22 @@
                             executeLogin();
                         }, 1000);
                     } else {
-                        // 验证失败，重置
-                        showSlideCaptchaError(data.message || '验证失败，请重试');
+                        const msg = data.message || '验证失败，请重试';
+                        if (msg.indexOf('等待') !== -1) {
+                            const match = msg.match(/(\d+)/);
+                            const seconds = match ? parseInt(match[0]) : 30;
+                            captchaCooldownUntil = Date.now() + seconds * 1000;
+                            closeSlideCaptcha();
+                            showError(msg);
+                            return;
+                        }
+                        showSlideCaptchaOverlay(msg, 'error', 2000);
                         setTimeout(() => {
                             generateSlideCaptcha();
                         }, 500);
                     }
                 } catch (e) {
-                    showSlideCaptchaError('网络错误');
+                    showSlideCaptchaOverlay('网络错误', 'error', 2000);
                     setTimeout(() => {
                         generateSlideCaptcha();
                     }, 500);
@@ -1924,12 +1957,12 @@
             document.addEventListener('mouseup', endDrag);
             document.addEventListener('touchend', endDrag);
 
-            // 刷新和关闭按钮
+            // 刷新和关闭
             if (slideCaptchaRefresh) {
                 slideCaptchaRefresh.addEventListener('click', generateSlideCaptcha);
             }
-            if (slideCaptchaClose) {
-                slideCaptchaClose.addEventListener('click', closeSlideCaptcha);
+            if (slideCaptchaCloseX) {
+                slideCaptchaCloseX.addEventListener('click', closeSlideCaptcha);
             }
 
             function login() {
@@ -1938,6 +1971,12 @@
 
                 if (!employee_id || !password) {
                     showError('请输入账号和密码');
+                    return;
+                }
+
+                if (captchaCooldownUntil > Date.now()) {
+                    const remaining = Math.ceil((captchaCooldownUntil - Date.now()) / 1000);
+                    showError('验证失败次数过多，请等待 ' + remaining + ' 秒后重试');
                     return;
                 }
 
@@ -2269,11 +2308,15 @@
     <!-- 滑动验证弹窗 -->
     <div id="slideCaptchaModal" class="slide-captcha-modal">
         <div class="slide-captcha-box">
+            <div class="slide-captcha-close-x" id="slideCaptchaCloseX">&times;</div>
             <div class="slide-captcha-title">请完成安全验证</div>
             <div class="slide-captcha-image-container">
                 <canvas id="slideCaptchaCanvas" class="slide-captcha-bg"></canvas>
                 <div id="slideCaptchaBlock" class="slide-captcha-block">
                     <canvas id="slideCaptchaBlockCanvas"></canvas>
+                </div>
+                <div id="slideCaptchaOverlay" class="slide-captcha-overlay">
+                    <span class="overlay-text" id="slideCaptchaOverlayText"></span>
                 </div>
             </div>
             <div class="slide-captcha-slider-container">
@@ -2285,12 +2328,7 @@
                     </svg>
                 </div>
             </div>
-            <div class="slide-captcha-actions">
-                <button id="slideCaptchaRefresh" class="slide-captcha-btn-refresh">换一张</button>
-                <button id="slideCaptchaClose" class="slide-captcha-btn-close">取消</button>
-            </div>
-            <div id="slideCaptchaError" class="slide-captcha-error"></div>
-            <div id="slideCaptchaSuccess" class="slide-captcha-success"></div>
+            <div class="slide-captcha-refresh" id="slideCaptchaRefresh">刷新</div>
         </div>
     </div>
 </body>

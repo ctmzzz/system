@@ -2,7 +2,7 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 
 const DB_CONFIG = {
-    host: 'localhost',
+    host: '192.168.3.6',
     port: 3306,
     user: 'root',
     password: 'Saodiseng1',
