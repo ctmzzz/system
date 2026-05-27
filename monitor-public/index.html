@@ -262,6 +262,26 @@
                     </div>
                     <button id="toggleDeviceList" class="toggle-ip-list-btn">查看/管理</button>
                 </div>
+
+                <div class="card online-monitor-card" id="onlineMonitorCard" style="display:none">
+                    <div class="card-header">
+                        <div class="card-icon online-monitor-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="12" y1="6" x2="12" y2="12"/>
+                                <line x1="12" y1="12" x2="16" y2="14"/>
+                            </svg>
+                        </div>
+                        <span>Monitor在线设备</span>
+                        <span class="pending-badge" id="onlineMonitorCount">0</span>
+                    </div>
+                    <div class="card-value online-monitor-value" id="onlineMonitorCountText">0 台在线</div>
+                    <div class="online-monitor-list-container" id="onlineMonitorListContainer" style="display:none">
+                        <h4 class="online-monitor-list-title">在线设备</h4>
+                        <div id="onlineMonitorList" class="online-monitor-list"></div>
+                    </div>
+                    <button id="toggleOnlineMonitorList" class="toggle-ip-list-btn">查看/管理</button>
+                </div>
             </div>
 
             <div class="chart-section">

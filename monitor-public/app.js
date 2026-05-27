@@ -368,8 +368,11 @@ function showMonitor() {
     if (currentAccessType === 'local') {
         document.getElementById('deviceCard').style.display = '';
         initDeviceManagement();
+        document.getElementById('onlineMonitorCard').style.display = '';
+        initOnlineMonitorManagement();
     } else {
         document.getElementById('deviceCard').style.display = 'none';
+        document.getElementById('onlineMonitorCard').style.display = 'none';
     }
     chartRenderLoop();
     
@@ -566,6 +569,35 @@ function initSocket() {
     });
     socket.on('device_removed', (data) => {
         refreshDeviceList();
+    });
+    socket.on('monitor_online_devices_updated', (devices) => {
+        if (currentAccessType === 'local') {
+            updateOnlineMonitorList(devices || []);
+        }
+    });
+    socket.on('kicked', () => {
+        // 设备被踢出后，直接返回登录页面，不显示 alert
+        sessionStorage.removeItem('monitor_auth');
+        // 关闭 monitor 页面，显示登录页面
+        if (socket) socket.disconnect();
+        if (logWorker) logWorker.terminate();
+        if (computeWorker) { computeWorker.postMessage({ type: 'reset' }); computeWorker.terminate(); computeWorker = null; }
+        stopPollingAccessStatus();
+        currentRequestId = null;
+        pendingLoginCreds = null;
+        document.getElementById('requestPopup').style.display = 'none';
+        document.getElementById('monitorPage').style.display = 'none';
+        document.getElementById('loginPage').style.display = 'flex';
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('loginError').textContent = '';
+        document.getElementById('username').value = '';
+        document.getElementById('password').value = '';
+        allLogs = [];
+        chartData = { cpu: [], memory: [], labels: [] };
+        pendingRenderLogs = [];
+        document.getElementById('logsContainer').innerHTML = '';
+        // 重新检查访问状态
+        checkAccess();
     });
 }
 
@@ -1194,4 +1226,93 @@ async function removeDevice(ip) {
 
 function refreshDeviceList() {
     loadCertifiedDevices();
+}
+
+function initOnlineMonitorManagement() {
+    const toggleBtn = document.getElementById('toggleOnlineMonitorList');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            const container = document.getElementById('onlineMonitorListContainer');
+            const isHidden = container.style.display === 'none';
+            container.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) {
+                loadOnlineMonitorDevices();
+            }
+        });
+    }
+    
+    loadOnlineMonitorDevices();
+}
+
+async function loadOnlineMonitorDevices() {
+    try {
+        const res = await fetch('/api/monitor-online-devices');
+        const data = await res.json();
+        if (data.success) {
+            updateOnlineMonitorList(data.devices || []);
+        }
+    } catch (err) {}
+}
+
+function updateOnlineMonitorList(devices) {
+    const countEl = document.getElementById('onlineMonitorCount');
+    const countTextEl = document.getElementById('onlineMonitorCountText');
+    const listEl = document.getElementById('onlineMonitorList');
+    countEl.textContent = devices.length;
+    countTextEl.textContent = devices.length + ' 台在线';
+    
+    if (devices.length > 0) {
+        listEl.innerHTML = devices.map(d => {
+            const connectedTime = new Date(d.connectedAt).toLocaleString('zh-CN');
+            const duration = formatDuration(Date.now() - d.connectedAt);
+            const isLocal = d.isLocal;
+            return `<div class="device-item">
+                <div>
+                    <span class="device-item-ip">${d.ip}${isLocal ? ' (本地)' : ''}</span>
+                    <span class="device-item-name">${d.userAgent || '未知设备'}</span><br>
+                    <span class="device-item-time">连接: ${connectedTime} | 在线: ${duration}</span>
+                </div>
+                <div>
+                    ${!isLocal ? `<button class="device-remove-btn" onclick="kickMonitorDevice('${d.ip}')">踢出</button>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    } else {
+        listEl.innerHTML = '<div class="device-item" style="color:var(--text-muted)">暂无在线设备</div>';
+    }
+}
+
+function formatDuration(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    if (hours > 0) {
+        return `${hours}小时${minutes % 60}分钟`;
+    } else if (minutes > 0) {
+        return `${minutes}分钟${seconds % 60}秒`;
+    } else {
+        return `${seconds}秒`;
+    }
+}
+
+async function kickMonitorDevice(ip) {
+    if (!confirm(`确定要踢出设备 ${ip} 吗？\n被踢出的设备需要重新申请访问授权。`)) return;
+    
+    try {
+        const res = await fetch('/api/kick-monitor-device', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetIp: ip })
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert('设备已踢出！');
+            await loadOnlineMonitorDevices();
+        } else {
+            alert('踢出失败: ' + (data.message || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求失败: ' + err.message);
+    }
 }

@@ -727,9 +727,6 @@ app.get('/monitor-auto-login', async (req, res) => {
 });
 
 // 获取滑动验证码
-const captchaRefreshMap = new Map();
-const CAPTCHA_REFRESH_INTERVAL_MS = 2000;
-
 app.get('/api/slide-captcha/generate', (req, res) => {
     try {
         const ip = getClientIP(req);
@@ -743,12 +740,6 @@ app.get('/api/slide-captcha/generate', (req, res) => {
             const remaining = Math.ceil((record.cooldownUntil - Date.now()) / 1000);
             return res.status(429).json({ success: false, cooldown: true, remaining: remaining, message: '验证失败次数过多，请等待 ' + remaining + ' 秒后重试' });
         }
-
-        const lastRefresh = captchaRefreshMap.get(ip) || 0;
-        if (Date.now() - lastRefresh < CAPTCHA_REFRESH_INTERVAL_MS) {
-            return res.status(429).json({ success: false, message: '切换太频繁，请稍后再试' });
-        }
-        captchaRefreshMap.set(ip, Date.now());
 
         const captcha = generateSlideCaptcha();
         const imageName = path.basename(captcha.imagePath);

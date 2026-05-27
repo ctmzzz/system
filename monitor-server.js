@@ -121,6 +121,10 @@ let attackDetected = false;
 let lastSystemInfo = null;
 let workerPoolStats = null;
 
+// ===== monitor 在线设备跟踪 =====
+const onlineMonitorSessions = new Map(); // socketId → { ip, connectedAt, userAgent }
+const kickedIPs = new Set();
+
 let lastCpuUsage = process.cpuUsage();
 let lastCpuTime = Date.now();
 
@@ -264,6 +268,7 @@ function verifyLoginCredentials(username, password) {
 
 app.post('/api/login', async (req, res) => {
     const ip = normalizeIP(getClientIP(req));
+    
     const { username, password } = req.body;
     if (!username || !password) {
         return res.status(400).json({ success: false, message: '请输入用户名和密码' });
@@ -322,6 +327,8 @@ app.get('/api/check-ip', (req, res) => {
     if (isLocalIP(ip)) {
         return res.json({ type: 'local', ip, message: '本地访问' });
     }
+    // 被踢出的设备不返回特殊状态，而是当作正常需要申请的设备处理
+    // 但踢出状态仍然在其他地方生效（如登录、WebSocket连接等）
     if (certifiedDevices.has(ip)) {
         return res.json({ type: 'certified', ip, device: certifiedDevices.get(ip) });
     }
@@ -383,6 +390,12 @@ setInterval(() => {
 app.post('/api/request-access', (req, res) => {
     const ip = normalizeIP(getClientIP(req));
     const { userAgent, username } = req.body;
+    
+    // 被踢出的设备重新申请时清除踢出标记
+    if (kickedIPs.has(ip)) {
+        kickedIPs.delete(ip);
+        addLog(`设备 ${ip} 重新申请访问，清除踢出标记`, 'info');
+    }
     
     const existingPending = [...pendingRequests.values()].find(r => r.ip === ip && r.status === 'pending');
     if (existingPending) {
@@ -529,6 +542,69 @@ app.post('/api/remove-device', (req, res) => {
         return res.json({ success: true, message: '设备已移除' });
     }
     res.status(404).json({ success: false, message: '设备不存在' });
+});
+
+// 获取 monitor 在线设备列表（仅本地可见）
+app.get('/api/monitor-online-devices', (req, res) => {
+    const ip = normalizeIP(getClientIP(req));
+    if (!isLocalIP(ip)) {
+        return res.status(403).json({ success: false, message: '仅本地访问' });
+    }
+    const devices = [...onlineMonitorSessions.values()].map(session => ({
+        ...session,
+        isLocal: isLocalIP(session.ip)
+    }));
+    res.json({ success: true, devices });
+});
+
+// 踢出指定 IP 的 monitor 设备
+app.post('/api/kick-monitor-device', (req, res) => {
+    const localIp = normalizeIP(getClientIP(req));
+    if (!isLocalIP(localIp)) {
+        return res.status(403).json({ success: false, message: '仅本地访问' });
+    }
+    const { targetIp } = req.body;
+    if (!targetIp) {
+        return res.status(400).json({ success: false, message: '缺少目标 IP' });
+    }
+    
+    // 检查是否是本地 IP，不允许踢出本地
+    if (isLocalIP(targetIp)) {
+        return res.status(403).json({ success: false, message: '不允许踢出本地设备' });
+    }
+    
+    // 添加到踢出列表
+    kickedIPs.add(targetIp);
+    addLog(`已踢出设备: ${targetIp}`, 'warning');
+    
+    // 断开该 IP 的所有 socket 连接
+    for (const [socketId, session] of onlineMonitorSessions.entries()) {
+        if (session.ip === targetIp) {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket) {
+                socket.emit('kicked');
+                socket.disconnect(true);
+            }
+        }
+    }
+    
+    // 如果该 IP 是认证设备，移除认证
+    if (certifiedDevices.has(targetIp)) {
+        certifiedDevices.delete(targetIp);
+        saveDevicesFile();
+    }
+    
+    // 清理该 IP 的临时审批
+    for (const [reqId, request] of pendingRequests.entries()) {
+        if (request.ip === targetIp && request.status === 'approved') {
+            request.status = 'revoked';
+            request.revokedAt = Date.now();
+        }
+    }
+    savePendingFile();
+    
+    io.emit('monitor_online_devices_updated', [...onlineMonitorSessions.values()]);
+    res.json({ success: true, message: '已踢出设备' });
 });
 
 app.get('/api/logs', (req, res) => {
@@ -1194,13 +1270,46 @@ function startWorkerPoolMonitor() {
 }
 
 io.on('connection', (socket) => {
+    const ip = normalizeIP(socket.handshake.address);
+    
+    // 检查是否被踢出
+    if (kickedIPs.has(ip)) {
+        socket.emit('kicked');
+        socket.disconnect(true);
+        return;
+    }
+    
     onlineUsers++;
-    addLog(`客户端连接: ${socket.id.substring(0, 8)}`, 'info');
+    
+    // 记录在线 session
+    const session = {
+        ip,
+        connectedAt: Date.now(),
+        userAgent: socket.handshake.headers['user-agent'] || '未知设备'
+    };
+    onlineMonitorSessions.set(socket.id, session);
+    
+    addLog(`客户端连接: ${socket.id.substring(0, 8)} (${ip})`, 'info');
+    
+    // 向所有本地连接推送在线设备更新
+    const devicesWithLocal = [...onlineMonitorSessions.values()].map(session => ({
+        ...session,
+        isLocal: isLocalIP(session.ip)
+    }));
+    io.emit('monitor_online_devices_updated', devicesWithLocal);
+    
     if (lastSystemInfo) socket.emit('system_info', lastSystemInfo);
     socket.emit('logs_history', [...serverLogs]);
+    
     socket.on('disconnect', () => {
         onlineUsers--;
-        addLog(`客户端断开: ${socket.id.substring(0, 8)}`, 'info');
+        onlineMonitorSessions.delete(socket.id);
+        addLog(`客户端断开: ${socket.id.substring(0, 8)} (${ip})`, 'info');
+        const devicesWithLocalAfter = [...onlineMonitorSessions.values()].map(session => ({
+            ...session,
+            isLocal: isLocalIP(session.ip)
+        }));
+        io.emit('monitor_online_devices_updated', devicesWithLocalAfter);
     });
 });
 
