@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教师详情 - 成绩分析系统</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="course-hours-page">
+<div id="toast" class="toast"></div>
+<div class="main-layout">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            <span>成绩分析</span>
+        </div>
+        <nav class="nav-menu">
+            <div class="nav-group">
+                <a class="nav-parent" href="/course-hours" style="cursor:pointer;">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                    返回课程管理
+                </a>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="user-info" style="cursor:pointer;" onclick="openPasswordModal()">
+                <div class="user-avatar" id="userAvatar">课</div>
+                <div class="user-details">
+                    <div class="user-name" id="userName">课程管理员</div>
+                    <div class="user-role" id="userRoleText">课程管理员</div>
+                </div>
+            </div>
+            <button type="button" class="logout-btn" onclick="logout()" style="margin-top:15px;width:100%;">退出登录</button>
+        </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+        <header class="page-header">
+            <div class="header-left">
+                <h1 class="page-title" id="pageTitle">教师详情</h1>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-sm" style="background:#F3F4F6;color:#374151;" onclick="openTeacherEditForm()">编辑信息</button>
+                <button class="btn btn-sm" style="background:#FEF3C7;color:#92400E;" onclick="history.back()">返回</button>
+            </div>
+        </header>
+
+        <div class="page-content">
+            <!-- 教师信息 -->
+            <div class="td-info-bar">
+                <span class="td-info-name" id="tdInfoName">--</span>
+                <span class="td-info-sep">|</span>
+                <span class="td-info-label">代课状态：</span><span class="td-info-val" id="tdInfoCanSub">--</span>
+                <span class="td-info-sep">|</span>
+                <span class="td-info-label">当前安排：</span><span class="td-info-val" id="tdInfoAssign">--</span>
+            </div>
+            <!-- 5 数据卡片 -->
+            <div class="td-cards">
+                <div class="td-card"><div class="td-card-num" id="tdCardClassCount">0</div><div class="td-card-label">上课次数</div></div>
+                <div class="td-card"><div class="td-card-num" id="tdCardSubCount">0</div><div class="td-card-label">代课次数</div></div>
+                <div class="td-card"><div class="td-card-num" id="tdCardLeaveCount">0</div><div class="td-card-label">请假次数</div></div>
+                <div class="td-card"><div class="td-card-num" id="tdCardTotalHours">0</div><div class="td-card-label">总课时</div></div>
+                <div class="td-card"><div class="td-card-num" id="tdCardActivityCount">0</div><div class="td-card-label">社团活动</div></div>
+            </div>
+            <!-- 明细列表 -->
+            <div class="td-detail-section">
+                <div class="td-detail-header">
+                    <div class="td-detail-title">详细记录</div>
+                    <div class="td-detail-filter">
+                        <input type="date" id="tdStartDate" class="td-date-input" placeholder="开始日期" title="查单天只填一个">
+                        <span class="td-filter-arrow">至</span>
+                        <input type="date" id="tdEndDate" class="td-date-input" placeholder="结束日期" title="查单天只填一个">
+                        <button class="btn btn-primary btn-sm" onclick="queryTeacherDetail()">查询</button>
+                    </div>
+                </div>
+                <div class="td-detail-list" id="tdDetailList">
+                    <div class="empty-cell" style="text-align:center;padding:24px;">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 教师编辑弹窗 -->
+<div class="modal-overlay" id="teacherEditModal">
+    <div class="modal" style="max-width:420px;">
+        <div class="modal-header">
+            <h2 class="modal-title">编辑教师信息</h2>
+            <button class="modal-close" onclick="closeModal('teacherEditModal')">✕</button>
+        </div>
+        <form class="modal-form" onsubmit="return saveTeacherDetail(event)">
+            <input type="hidden" id="editTeacherId">
+            <div class="form-group"><label>教师姓名</label><input type="text" id="editTeacherName" required></div>
+            <div class="form-group">
+                <label>代课状态</label>
+                <select id="editTeacherCanSub">
+                    <option value="1">可代课</option>
+                    <option value="0">不可代课</option>
+                </select>
+            </div>
+            <div class="form-group"><label>当前安排</label><input type="text" id="editTeacherAssign" placeholder="如：代某某老师"></div>
+            <div class="modal-actions" style="display:flex;justify-content:space-between;">
+                <button type="button" class="btn btn-sm" style="background:#FEE2E2;color:#EF4444;" onclick="deleteTeacherFromRoster(parseInt(document.getElementById('editTeacherId').value), document.getElementById('editTeacherName').value)">删除教师</button>
+                <div style="display:flex;gap:8px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('teacherEditModal')">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 修改密码弹窗 -->
+<div class="modal-overlay" id="passwordModal" style="display:none;">
+    <div class="modal" style="max-width:360px;">
+        <div class="modal-header">
+            <h2 class="modal-title">修改密码</h2>
+            <button class="modal-close" onclick="closeModal('passwordModal')">✕</button>
+        </div>
+        <form class="modal-form" onsubmit="return doChangePassword(event)">
+            <div class="form-group"><label>当前密码</label><input type="password" id="oldPassword" required></div>
+            <div class="form-group"><label>新密码</label><input type="password" id="newPassword" required minlength="4"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('passwordModal')">取消</button>
+                <button type="submit" class="btn btn-primary">确认修改</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/js/teacher-detail.js"></script>
+</body>
+</html>
