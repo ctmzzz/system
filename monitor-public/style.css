@@ -365,6 +365,214 @@ body {
     background: var(--accent-hover);
 }
 
+.request-popup-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.request-popup-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px 36px;
+    width: 380px;
+    max-width: 90vw;
+    text-align: center;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    position: relative;
+}
+.request-popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--accent);
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+.request-popup-header svg {
+    animation: pulse-ring 1.5s ease-in-out infinite;
+}
+@keyframes pulse-ring {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.05); }
+}
+.request-popup-body {
+    margin-bottom: 24px;
+}
+.popup-countdown-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+.popup-countdown {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: 'Courier New', monospace;
+    letter-spacing: 1px;
+}
+.popup-expires {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 8px;
+}
+.request-popup-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+.popup-cancel-btn {
+    padding: 10px 32px;
+    background: rgba(239,68,68,0.15);
+    color: var(--error);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: var(--transition);
+}
+.popup-cancel-btn:hover {
+    background: rgba(239,68,68,0.25);
+    border-color: rgba(239,68,68,0.5);
+}
+.popup-close-x {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 22px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+}
+.popup-close-x:hover { color: var(--text-primary); }
+
+.pending-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: var(--error);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+.device-list-container,
+.pending-list-container {
+    margin-top: 8px;
+    max-height: 160px;
+    overflow-y: auto;
+}
+.device-list-title {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 6px;
+}
+.device-list,
+.pending-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.device-item,
+.pending-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+}
+.device-item-ip {
+    font-family: 'Courier New', monospace;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+.device-item-name {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-left: 8px;
+}
+.device-item-time {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+.device-remove-btn {
+    padding: 3px 8px;
+    background: transparent;
+    border: 1px solid var(--error);
+    color: var(--error);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.device-remove-btn:hover {
+    background: var(--error);
+    color: white;
+}
+.pending-actions {
+    display: flex;
+    gap: 6px;
+}
+.pending-approve-btn,
+.pending-reject-btn {
+    padding: 4px 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.pending-approve-cert-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.pending-approve-btn {
+    background: var(--success);
+    color: white;
+}
+.pending-reject-btn {
+    background: transparent;
+    border: 1px solid var(--error);
+    color: var(--error);
+}
+.pending-approve-btn:hover {
+    background: #059669;
+}
+.pending-reject-btn:hover {
+    background: var(--error);
+    color: white;
+}
+.pending-approve-cert-btn:hover {
+    background: var(--accent);
+    color: white;
+}
+
 .chart-section {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -675,4 +883,26 @@ body {
 .resource-value {
     font-size: 18px;
     font-weight: 700;
+}
+
+.go-to-admin-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--accent);
+    border-radius: var(--radius-sm);
+    color: white;
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all var(--transition);
+}
+.go-to-admin-btn:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
+.go-to-admin-btn svg {
+    width: 14px;
+    height: 14px;
 }

@@ -24,6 +24,7 @@ const io = new Server(server, {
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'monitor-public')));
+app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = 3002;
 const LOGS_DIR = path.join(__dirname, 'logs');
@@ -135,6 +136,73 @@ let cachedOsInfo = null;
 let lastDiskFetch = 0;
 const SLOW_FETCH_INTERVAL = 30000;
 
+// ===== 设备访问控制系统 =====
+const DEVICES_FILE = path.join(__dirname, 'certified-devices.json');
+const PENDING_FILE = path.join(__dirname, 'pending-requests.json');
+let certifiedDevices = new Map(); // ip → { name, addedAt, approvedBy }
+let pendingRequests = new Map();  // sessionId → { ip, userAgent, requestedAt, status }
+
+function loadDevicesFile() {
+    try {
+        if (fs.existsSync(DEVICES_FILE)) {
+            const data = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8'));
+            certifiedDevices = new Map(Object.entries(data));
+        }
+    } catch (e) {}
+}
+function saveDevicesFile() {
+    try {
+        fs.writeFileSync(DEVICES_FILE, JSON.stringify(Object.fromEntries(certifiedDevices)), 'utf8');
+    } catch (e) {}
+}
+function loadPendingFile() {
+    try {
+        if (fs.existsSync(PENDING_FILE)) {
+            const data = JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8'));
+            pendingRequests = new Map(Object.entries(data));
+        }
+    } catch (e) {}
+}
+function savePendingFile() {
+    try {
+        fs.writeFileSync(PENDING_FILE, JSON.stringify(Object.fromEntries(pendingRequests)), 'utf8');
+    } catch (e) {}
+}
+loadDevicesFile();
+loadPendingFile();
+
+function getClientIP(req) {
+    return req.ip || req.connection.remoteAddress || req.socket.remoteAddress ||
+        (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+        req.headers['x-forwarded-for'] || 'unknown';
+}
+
+function normalizeIP(ip) {
+    if (ip === '::1' || ip === '::ffff:127.0.0.1') return '127.0.0.1';
+    if (ip.startsWith('::ffff:')) return ip.substring(7);
+    return ip;
+}
+
+function isLocalIP(ip) {
+    ip = normalizeIP(ip);
+    if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') return true;
+    if (ip === LOCAL_IP) return true;
+    return false;
+}
+
+function isLANIP(ip) {
+    ip = normalizeIP(ip);
+    if (isLocalIP(ip)) return true;
+    const parts = ip.split('.');
+    if (parts.length === 4) {
+        const b = parseInt(parts[1]);
+        if (parts[0] === '192' && b === 168) return true;
+        if (parts[0] === '10') return true;
+        if (parts[0] === '172' && b >= 16 && b <= 31) return true;
+    }
+    return false;
+}
+
 function startPsMonitor() {
     const psScript = path.join(__dirname, 'monitor.ps1');
     if (!fs.existsSync(psScript)) {
@@ -187,11 +255,22 @@ function startPsMonitor() {
     }
 }
 
+function verifyLoginCredentials(username, password) {
+    if ((username === 'admin' && password === 'admin123') || (username === 'root' && password === 'root')) {
+        return { ok: true, name: username };
+    }
+    return { ok: false };
+}
+
 app.post('/api/login', async (req, res) => {
+    const ip = normalizeIP(getClientIP(req));
     const { username, password } = req.body;
     if (!username || !password) {
         return res.status(400).json({ success: false, message: '请输入用户名和密码' });
     }
+
+    let credOk = false;
+    let userName = username;
     if (dbConnected) {
         try {
             const [rows] = await dbPool.execute(
@@ -202,20 +281,254 @@ app.post('/api/login', async (req, res) => {
                 const user = rows[0];
                 const bcrypt = require('bcryptjs');
                 if (bcrypt.compareSync(password, user.password) || password === user.plain_password) {
-                    addLog(`管理员 ${username} 登录成功`, 'success');
-                    return res.json({ success: true, user: { name: user.name, username: user.employee_id } });
+                    credOk = true;
+                    userName = user.name;
                 }
             }
         } catch (err) {
             addLog(`数据库验证失败: ${err.message}`, 'error');
         }
     }
-    if ((username === 'admin' && password === 'admin123') || (username === 'root' && password === 'root')) {
-        addLog(`管理员 ${username} 登录成功（备用验证）`, 'success');
-        return res.json({ success: true, user: { name: username, username } });
+    if (!credOk) {
+        const fb = verifyLoginCredentials(username, password);
+        if (fb.ok) {
+            credOk = true;
+            userName = fb.name;
+        }
     }
-    addLog(`登录失败: ${username}`, 'warning');
-    res.status(401).json({ success: false, message: '用户名或密码错误' });
+
+    if (!credOk) {
+        addLog(`登录失败（密码错误）: ${username}`, 'warning');
+        return res.status(401).json({ success: false, message: '用户名或密码错误' });
+    }
+
+    if (!isLocalIP(ip) && !certifiedDevices.has(ip)) {
+        const now = Date.now();
+        const approved = [...pendingRequests.values()].find(r => 
+            r.ip === ip && r.status === 'approved' && r.approvedAt && (now - r.approvedAt) < REQUEST_EXPIRE_MS
+        );
+        if (!approved) {
+            return res.json({ success: false, cred_ok: true, message: '凭证正确，需要申请访问授权', username, password: undefined });
+        }
+    }
+
+    addLog(`管理员 ${username} 登录成功`, 'success');
+    res.json({ success: true, user: { name: userName, username } });
+});
+
+// 检查IP类型（本地/局域网/认证设备/需要审批）
+app.get('/api/check-ip', (req, res) => {
+    const ip = normalizeIP(getClientIP(req));
+    if (isLocalIP(ip)) {
+        return res.json({ type: 'local', ip, message: '本地访问' });
+    }
+    if (certifiedDevices.has(ip)) {
+        return res.json({ type: 'certified', ip, device: certifiedDevices.get(ip) });
+    }
+    const now = Date.now();
+    const pending = [...pendingRequests.values()].find(r => 
+        r.ip === ip && r.status === 'approved' && r.approvedAt && (now - r.approvedAt) < REQUEST_EXPIRE_MS
+    );
+    if (pending) {
+        return res.json({ type: 'approved', ip, temporary: true });
+    }
+    if (isLANIP(ip)) {
+        return res.json({ type: 'lan', ip, message: '局域网设备，需要申请访问' });
+    }
+    return res.json({ type: 'external', ip, message: '外部网络，需要申请访问' });
+});
+
+// 请求有效期 600s
+const REQUEST_EXPIRE_MS = 600 * 1000;
+
+// 启动时清理过期请求
+(function cleanupStaleOnStartup() {
+    const now = Date.now();
+    let changed = false;
+    for (const [id, req] of pendingRequests) {
+        if (req.status === 'pending' && req.expiresAt && now > req.expiresAt) {
+            req.status = 'expired';
+            changed = true;
+        }
+        if (req.status === 'approved' && req.type === 'temporary' && req.approvedAt && (now - req.approvedAt) > REQUEST_EXPIRE_MS) {
+            req.status = 'expired';
+            changed = true;
+        }
+    }
+    if (changed) savePendingFile();
+})();
+
+// 定期清理过期请求
+setInterval(() => {
+    const now = Date.now();
+    let changed = false;
+    for (const [id, req] of pendingRequests) {
+        if (req.status === 'pending' && req.expiresAt && now > req.expiresAt) {
+            req.status = 'expired';
+            changed = true;
+            addLog(`访问请求已过期: ${req.ip} (${req.username || '未知用户'})`, 'info');
+            io.emit('access_request_expired', { requestId: id, ip: req.ip });
+        }
+        if (req.status === 'approved' && req.type === 'temporary' && req.approvedAt && (now - req.approvedAt) > REQUEST_EXPIRE_MS) {
+            req.status = 'expired';
+            changed = true;
+            addLog(`临时访问已过期: ${req.ip} (${req.username || '未知用户'})`, 'info');
+            io.emit('access_request_expired', { requestId: id, ip: req.ip });
+        }
+    }
+    if (changed) savePendingFile();
+}, 10000);
+
+// 局域网设备申请访问
+app.post('/api/request-access', (req, res) => {
+    const ip = normalizeIP(getClientIP(req));
+    const { userAgent, username } = req.body;
+    
+    const existingPending = [...pendingRequests.values()].find(r => r.ip === ip && r.status === 'pending');
+    if (existingPending) {
+        return res.json({ success: true, message: '已存在待审批的请求，请等待管理员处理', status: 'pending', requestId: existingPending.id });
+    }
+    
+    if (certifiedDevices.has(ip)) {
+        return res.json({ success: true, message: '已认证设备，无需再次申请', status: 'certified' });
+    }
+    
+    const reqId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+    const request = {
+        id: reqId,
+        ip,
+        username: username || '未知用户',
+        userAgent: userAgent || '未知设备',
+        requestedAt: Date.now(),
+        expiresAt: Date.now() + REQUEST_EXPIRE_MS,
+        status: 'pending'
+    };
+    pendingRequests.set(reqId, request);
+    savePendingFile();
+    
+    addLog(`新设备申请访问: ${ip} (用户: ${request.username}, 设备: ${request.userAgent})`, 'info');
+    io.emit('new_access_request', request);
+    
+    res.json({ success: true, message: '访问申请已发送，请等待管理员审批', requestId: reqId });
+});
+
+// 查询申请状态
+app.get('/api/request-status/:requestId', (req, res) => {
+    const request = pendingRequests.get(req.params.requestId);
+    if (!request) {
+        return res.json({ status: 'not_found' });
+    }
+    if (request.status === 'pending' && request.expiresAt && Date.now() > request.expiresAt) {
+        request.status = 'expired';
+        savePendingFile();
+    }
+    res.json(request);
+});
+
+// 获取所有待审批请求
+app.get('/api/pending-requests', (req, res) => {
+    const pending = [...pendingRequests.values()].filter(r => r.status === 'pending');
+    res.json({ success: true, requests: pending });
+});
+
+// 审批访问请求
+app.post('/api/approve-access', (req, res) => {
+    const { requestId, type } = req.body; // type: 'temporary' | 'certified'
+    const request = pendingRequests.get(requestId);
+    if (!request) {
+        return res.status(404).json({ success: false, message: '请求不存在' });
+    }
+    
+    if (type === 'certified') {
+        certifiedDevices.set(request.ip, {
+            name: request.userAgent || request.ip,
+            addedAt: Date.now(),
+            approvedBy: 'monitor'
+        });
+        saveDevicesFile();
+        addLog(`设备已认证: ${request.ip} (${request.userAgent})`, 'success');
+    }
+    
+    request.status = 'approved';
+    request.approvedAt = Date.now();
+    request.type = type;
+    savePendingFile();
+    
+    addLog(`访问请求已批准: ${request.ip} (${type})`, 'success');
+    io.emit('access_request_approved', { requestId, ip: request.ip, type });
+    res.json({ success: true, message: '已批准' });
+});
+
+// 拒绝访问请求
+app.post('/api/reject-access', (req, res) => {
+    const { requestId } = req.body;
+    const request = pendingRequests.get(requestId);
+    if (!request) {
+        return res.status(404).json({ success: false, message: '请求不存在' });
+    }
+    
+    request.status = 'rejected';
+    request.rejectedAt = Date.now();
+    savePendingFile();
+    
+    addLog(`访问请求已拒绝: ${request.ip}`, 'warning');
+    io.emit('access_request_rejected', { requestId, ip: request.ip });
+    res.json({ success: true, message: '已拒绝' });
+});
+
+// 取消访问请求
+app.post('/api/cancel-request', (req, res) => {
+    const { requestId } = req.body;
+    const request = pendingRequests.get(requestId);
+    if (!request) {
+        return res.status(404).json({ success: false, message: '请求不存在' });
+    }
+    if (request.status !== 'pending') {
+        return res.json({ success: false, message: '请求状态已变更，无法取消' });
+    }
+    request.status = 'cancelled';
+    request.cancelledAt = Date.now();
+    savePendingFile();
+    addLog(`访问请求已被用户取消: ${request.ip} (${request.username || '未知用户'})`, 'info');
+    io.emit('access_request_cancelled', { requestId, ip: request.ip });
+    res.json({ success: true, message: '请求已取消' });
+});
+
+// 撤销临时审批（退出登录时调用）
+app.post('/api/revoke-temp', (req, res) => {
+    const ip = normalizeIP(getClientIP(req));
+    const approved = [...pendingRequests.values()].find(r => r.ip === ip && r.status === 'approved' && r.type === 'temporary');
+    if (approved) {
+        approved.status = 'revoked';
+        approved.revokedAt = Date.now();
+        savePendingFile();
+        addLog(`临时访问权限已撤销: ${ip}`, 'info');
+    }
+    res.json({ success: true });
+});
+
+// 获取所有认证设备
+app.get('/api/certified-devices', (req, res) => {
+    const devices = [...certifiedDevices.entries()].map(([ip, info]) => ({
+        ip,
+        name: info.name,
+        addedAt: info.addedAt
+    }));
+    res.json({ success: true, devices });
+});
+
+// 移除认证设备
+app.post('/api/remove-device', (req, res) => {
+    const { ip } = req.body;
+    if (certifiedDevices.has(ip)) {
+        const info = certifiedDevices.get(ip);
+        certifiedDevices.delete(ip);
+        saveDevicesFile();
+        addLog(`认证设备已移除: ${ip} (${info.name})`, 'info');
+        io.emit('device_removed', { ip });
+        return res.json({ success: true, message: '设备已移除' });
+    }
+    res.status(404).json({ success: false, message: '设备不存在' });
 });
 
 app.get('/api/logs', (req, res) => {

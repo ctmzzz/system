@@ -20,7 +20,9 @@ const MAX_DOM_LOGS = 200;
 const CHART_RENDER_SKIP = 3;
 
 document.addEventListener('DOMContentLoaded', () => {
-    initLogin();
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('monitorPage').style.display = 'none';
+    checkAccess();
     initFilterButtons();
     initAutoScrollBtn();
     initClearBtn();
@@ -68,45 +70,291 @@ function updatePerfDisplay() {
     el.textContent = `FPS:${perfData.fps} | DOM:${perfData.domNodes} | Mem:${perfData.jsHeapSize}MB | LT:${perfData.longTasks}`;
 }
 
+let currentAccessType = null;
+let currentRequestId = null;
+let accessPollInterval = null;
+let pendingLoginCreds = null;
+
+async function checkAccess() {
+    try {
+        const res = await fetch('/api/check-ip');
+        const data = await res.json();
+        currentAccessType = data.type;
+        const hint = document.getElementById('loginHint');
+        if (data.type === 'local') {
+            hint.textContent = '服务器本机';
+        } else if (data.type === 'certified') {
+            hint.textContent = '已认证设备';
+        } else if (data.type === 'approved') {
+            hint.textContent = '已获得临时访问权限';
+        } else {
+            hint.textContent = '服务器监控';
+        }
+
+        const wasAuth = sessionStorage.getItem('monitor_auth') === '1';
+        if (wasAuth && (data.type === 'local' || data.type === 'certified' || data.type === 'approved')) {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('monitorPage').style.display = 'flex';
+            showMonitor();
+            return;
+        }
+
+        if (wasAuth && data.type !== 'local' && data.type !== 'certified' && data.type !== 'approved') {
+            sessionStorage.removeItem('monitor_auth');
+        }
+
+        document.getElementById('loginPage').style.display = 'flex';
+        document.getElementById('monitorPage').style.display = 'none';
+        initLogin();
+    } catch (err) {
+        currentAccessType = null;
+        sessionStorage.removeItem('monitor_auth');
+        document.getElementById('loginHint').textContent = '服务器监控';
+        document.getElementById('loginPage').style.display = 'flex';
+        document.getElementById('monitorPage').style.display = 'none';
+        initLogin();
+    }
+}
+
+function showRequestPopup(username, password) {
+    stopPollingAccessStatus();
+    currentRequestId = null;
+    pendingLoginCreds = { username, password };
+    const popup = document.getElementById('requestPopup');
+    const countdownEl = document.getElementById('popupCountdown');
+    const expiresEl = document.getElementById('popupExpires');
+    const btn = document.querySelector('.login-btn');
+    const txt = btn.querySelector('.btn-text');
+    const loader = btn.querySelector('.btn-loader');
+    txt.style.display = 'block';
+    loader.style.display = 'none';
+    popup.style.display = 'flex';
+    let remaining = 600;
+    const updateCountdown = () => {
+        if (remaining <= 0) {
+            countdownEl.textContent = '已过期';
+            countdownEl.style.color = 'var(--error)';
+            closeRequestPopup();
+            document.getElementById('loginError').textContent = '请求已超时（600秒），请重新提交';
+            setTimeout(() => document.getElementById('loginError').textContent = '', 3000);
+            return;
+        }
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        countdownEl.textContent = m + '分' + s + '秒';
+        remaining--;
+    };
+    updateCountdown();
+    const countdownTimer = setInterval(updateCountdown, 1000);
+
+    const checkInterval = setInterval(async () => {
+        if (!currentRequestId) return;
+        try {
+            const res = await fetch('/api/request-status/' + currentRequestId);
+            const data = await res.json();
+            if (data.status === 'approved') {
+                currentAccessType = 'approved';
+                clearInterval(countdownTimer);
+                clearInterval(checkInterval);
+                popup.style.display = 'none';
+                await performLogin(username, password);
+            } else if (data.status === 'rejected') {
+                clearInterval(countdownTimer);
+                clearInterval(checkInterval);
+                popup.style.display = 'none';
+                document.getElementById('loginError').textContent = '访问申请已被拒绝';
+                setTimeout(() => document.getElementById('loginError').textContent = '', 3000);
+                currentRequestId = null;
+                pendingLoginCreds = null;
+            } else if (data.status === 'expired' || data.status === 'cancelled') {
+                clearInterval(countdownTimer);
+                clearInterval(checkInterval);
+                popup.style.display = 'none';
+                if (data.status === 'expired') {
+                    document.getElementById('loginError').textContent = '请求已超时（600秒），请重新提交';
+                }
+                setTimeout(() => document.getElementById('loginError').textContent = '', 3000);
+                currentRequestId = null;
+                pendingLoginCreds = null;
+            }
+        } catch (e) {}
+    }, 2000);
+
+    const doCancel = async () => {
+        if (currentRequestId) {
+            try {
+                await fetch('/api/cancel-request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ requestId: currentRequestId })
+                });
+            } catch (e) {}
+        }
+        clearInterval(countdownTimer);
+        clearInterval(checkInterval);
+        popup.style.display = 'none';
+        currentRequestId = null;
+        pendingLoginCreds = null;
+    };
+
+    document.getElementById('popupCancelBtn').onclick = doCancel;
+    document.getElementById('popupCloseBtn').onclick = doCancel;
+
+    fetch('/api/request-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            username,
+            userAgent: navigator.userAgent.substring(0, 100)
+        })
+    }).then(res => res.json()).then(data => {
+        if (data.success) {
+            if (data.status === 'certified') {
+                clearInterval(countdownTimer);
+                clearInterval(checkInterval);
+                popup.style.display = 'none';
+                performLogin(username, password);
+            } else {
+                currentRequestId = data.requestId;
+                const expiresAt = Date.now() + 600 * 1000;
+                const d = new Date(expiresAt);
+                expiresEl.textContent = '过期时间: ' + d.toLocaleTimeString('zh-CN');
+            }
+        } else {
+            clearInterval(countdownTimer);
+            clearInterval(checkInterval);
+            popup.style.display = 'none';
+            document.getElementById('loginError').textContent = data.message || '申请失败';
+            setTimeout(() => document.getElementById('loginError').textContent = '', 3000);
+        }
+    }).catch(err => {
+        clearInterval(countdownTimer);
+        clearInterval(checkInterval);
+        popup.style.display = 'none';
+        document.getElementById('loginError').textContent = '网络错误，请重试';
+        setTimeout(() => document.getElementById('loginError').textContent = '', 3000);
+    });
+}
+
+function closeRequestPopup() {
+    document.getElementById('requestPopup').style.display = 'none';
+    currentRequestId = null;
+    pendingLoginCreds = null;
+}
+
+function stopPollingAccessStatus() {
+    if (accessPollInterval) {
+        clearInterval(accessPollInterval);
+        accessPollInterval = null;
+    }
+}
+
+function performLogin(username, password) {
+    return fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    }).then(res => res.json()).then(data => {
+        if (data.success) {
+            showMonitor();
+            pendingLoginCreds = null;
+            currentRequestId = null;
+        } else {
+            const errEl = document.getElementById('loginError');
+            errEl.textContent = data.message || '登录失败';
+            setTimeout(() => errEl.textContent = '', 3000);
+            pendingLoginCreds = null;
+            currentRequestId = null;
+        }
+    }).catch(err => {
+        const errEl = document.getElementById('loginError');
+        errEl.textContent = '网络错误，请重试';
+        setTimeout(() => errEl.textContent = '', 3000);
+        pendingLoginCreds = null;
+        currentRequestId = null;
+    });
+}
+
+let loginSubmitHandler = null;
+
 function initLogin() {
     const form = document.getElementById('loginForm');
-    form.addEventListener('submit', async (e) => {
+    form.style.display = 'flex';
+    if (loginSubmitHandler) {
+        form.removeEventListener('submit', loginSubmitHandler);
+    }
+    loginSubmitHandler = async (e) => {
         e.preventDefault();
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
+        if (!username || !password) return;
         const btn = form.querySelector('.login-btn');
         const txt = btn.querySelector('.btn-text');
         const loader = btn.querySelector('.btn-loader');
-        txt.style.display = 'none';
-        loader.style.display = 'flex';
-        try {
-            const res = await fetch('/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            });
-            const data = await res.json();
-            if (data.success) {
-                showMonitor();
-            } else {
-                const errEl = document.getElementById('loginError');
+        const errEl = document.getElementById('loginError');
+        errEl.textContent = '';
+
+        if (currentAccessType === 'local' || currentAccessType === 'certified' || currentAccessType === 'approved') {
+            txt.style.display = 'none';
+            loader.style.display = 'flex';
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showMonitor();
+                } else {
+                    errEl.textContent = data.message || '登录失败';
+                    setTimeout(() => errEl.textContent = '', 3000);
+                }
+            } catch (err) {
+                errEl.textContent = '网络错误，请重试';
+                setTimeout(() => errEl.textContent = '', 3000);
+            } finally {
+                txt.style.display = 'block';
+                loader.style.display = 'none';
+            }
+        } else {
+            txt.style.display = 'none';
+            loader.style.display = 'flex';
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (data.cred_ok) {
+                    txt.style.display = 'block';
+                    loader.style.display = 'none';
+                    showRequestPopup(username, password);
+                    return;
+                }
+                if (data.success) {
+                    showRequestPopup(username, password);
+                    return;
+                }
                 errEl.textContent = data.message || '登录失败';
                 setTimeout(() => errEl.textContent = '', 3000);
+            } catch (err) {
+                errEl.textContent = '网络错误，请重试';
+                setTimeout(() => errEl.textContent = '', 3000);
+            } finally {
+                txt.style.display = 'block';
+                loader.style.display = 'none';
             }
-        } catch (err) {
-            const errEl = document.getElementById('loginError');
-            errEl.textContent = '网络错误，请重试';
-            setTimeout(() => errEl.textContent = '', 3000);
-        } finally {
-            txt.style.display = 'block';
-            loader.style.display = 'none';
         }
-    });
+    };
+    form.addEventListener('submit', loginSubmitHandler);
 }
 
 let backupRefreshInterval = null;
 
 function showMonitor() {
+    sessionStorage.setItem('monitor_auth', '1');
     document.getElementById('loginPage').style.display = 'none';
     document.getElementById('monitorPage').style.display = 'flex';
     initLogWorker();
@@ -117,6 +365,12 @@ function showMonitor() {
     initBackupBtn();
     loadBackupList();
     initIpManagement();
+    if (currentAccessType === 'local') {
+        document.getElementById('deviceCard').style.display = '';
+        initDeviceManagement();
+    } else {
+        document.getElementById('deviceCard').style.display = 'none';
+    }
     chartRenderLoop();
     
     if (backupRefreshInterval) clearInterval(backupRefreshInterval);
@@ -191,16 +445,28 @@ async function loadBackupList() {
 }
 
 function initLogoutBtn() {
-    document.getElementById('logoutBtn').addEventListener('click', () => {
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+        try { await fetch('/api/revoke-temp', { method: 'POST' }); } catch (e) {}
+        sessionStorage.removeItem('monitor_auth');
+        currentAccessType = null;
         if (socket) socket.disconnect();
         if (logWorker) logWorker.terminate();
         if (computeWorker) { computeWorker.postMessage({ type: 'reset' }); computeWorker.terminate(); computeWorker = null; }
+        stopPollingAccessStatus();
+        currentRequestId = null;
+        pendingLoginCreds = null;
+        document.getElementById('requestPopup').style.display = 'none';
         document.getElementById('monitorPage').style.display = 'none';
         document.getElementById('loginPage').style.display = 'flex';
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('loginError').textContent = '';
+        document.getElementById('username').value = '';
+        document.getElementById('password').value = '';
         allLogs = [];
         chartData = { cpu: [], memory: [], labels: [] };
         pendingRenderLogs = [];
         document.getElementById('logsContainer').innerHTML = '';
+        checkAccess();
     });
 }
 
@@ -282,6 +548,24 @@ function initSocket() {
     });
     socket.on('locked_ips', (ips) => {
         updateIpList(ips);
+    });
+    socket.on('new_access_request', (request) => {
+        addAccessRequestNotification(request);
+    });
+    socket.on('access_request_approved', (data) => {
+        removeAccessRequestNotification(data.requestId);
+    });
+    socket.on('access_request_rejected', (data) => {
+        removeAccessRequestNotification(data.requestId);
+    });
+    socket.on('access_request_cancelled', (data) => {
+        removeAccessRequestNotification(data.requestId);
+    });
+    socket.on('access_request_expired', (data) => {
+        removeAccessRequestNotification(data.requestId);
+    });
+    socket.on('device_removed', (data) => {
+        refreshDeviceList();
     });
 }
 
@@ -732,4 +1016,182 @@ async function unlockIp(ip) {
     } catch (err) {
         alert('请求失败: ' + err.message);
     }
+}
+
+function initDeviceManagement() {
+    const toggleBtn = document.getElementById('toggleDeviceList');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            const container = document.getElementById('deviceListContainer');
+            const pendingContainer = document.getElementById('pendingListContainer');
+            const isHidden = container.style.display === 'none';
+            container.style.display = isHidden ? 'block' : 'none';
+            pendingContainer.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) {
+                loadCertifiedDevices();
+                loadPendingRequests();
+            }
+        });
+    }
+    
+    loadCertifiedDevices();
+    loadPendingRequests();
+    startCountdownTicker();
+    
+    setInterval(loadCertifiedDevices, 30000);
+}
+
+let countdownTicker = null;
+function startCountdownTicker() {
+    if (countdownTicker) return;
+    countdownTicker = setInterval(() => {
+        const timers = document.querySelectorAll('.pending-countdown');
+        if (timers.length === 0) return;
+        timers.forEach(el => {
+            const expiresAt = parseInt(el.getAttribute('data-expires'));
+            if (!expiresAt) return;
+            const remainSec = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+            if (remainSec <= 0) {
+                el.textContent = '已过期';
+                el.style.color = 'var(--error)';
+            } else {
+                const m = Math.floor(remainSec / 60);
+                const s = remainSec % 60;
+                el.textContent = '剩余' + m + '分' + s + '秒';
+                el.style.color = '';
+            }
+        });
+    }, 1000);
+}
+
+async function loadCertifiedDevices() {
+    try {
+        const res = await fetch('/api/certified-devices');
+        const data = await res.json();
+        if (data.success) {
+            updateDeviceList(data.devices || []);
+        }
+    } catch (err) {}
+}
+
+async function loadPendingRequests() {
+    try {
+        const res = await fetch('/api/pending-requests');
+        const data = await res.json();
+        if (data.success) {
+            updatePendingList(data.requests || []);
+        }
+    } catch (err) {}
+}
+
+function updateDeviceList(devices) {
+    const countEl = document.getElementById('deviceCount');
+    const listEl = document.getElementById('deviceList');
+    countEl.textContent = devices.length + ' 台已认证';
+    if (devices.length > 0) {
+        listEl.innerHTML = devices.map(d => {
+            const addedTime = new Date(d.addedAt).toLocaleString('zh-CN');
+            return '<div class="device-item">' +
+                '<div><span class="device-item-ip">' + d.ip + '</span>' +
+                '<span class="device-item-name">' + (d.name || '') + '</span></div>' +
+                '<div><span class="device-item-time">' + addedTime + '</span>' +
+                '<button class="device-remove-btn" onclick="removeDevice(\'' + d.ip + '\')">移除</button></div>' +
+                '</div>';
+        }).join('');
+        document.getElementById('deviceListContainer').style.display = 'block';
+    } else {
+        listEl.innerHTML = '<div class="device-item" style="color:var(--text-muted)">暂无认证设备</div>';
+    }
+}
+
+function updatePendingList(requests) {
+    const listEl = document.getElementById('pendingList');
+    const badgeEl = document.getElementById('pendingBadge');
+    if (requests.length > 0) {
+        badgeEl.style.display = 'inline-flex';
+        badgeEl.textContent = requests.length;
+        listEl.innerHTML = requests.map(r => {
+            const reqTime = new Date(r.requestedAt).toLocaleString('zh-CN');
+            return '<div class="pending-item" id="pending-' + r.id + '">' +
+                '<div><span class="device-item-ip">' + r.ip + '</span>' +
+                '<span class="device-item-name">用户: ' + (r.username || '未知') + '</span><br>' +
+                '<span class="device-item-time">' + reqTime + ' | </span>' +
+                '<span class="pending-countdown" data-expires="' + (r.expiresAt || 0) + '"></span></div>' +
+                '<div class="pending-actions">' +
+                '<button class="pending-approve-btn" onclick="approveAccess(\'' + r.id + '\',\'temporary\')">临时通过</button>' +
+                '<button class="pending-approve-cert-btn" onclick="approveAccess(\'' + r.id + '\',\'certified\')">认证设备</button>' +
+                '<button class="pending-reject-btn" onclick="rejectAccess(\'' + r.id + '\')">拒绝</button>' +
+                '</div>' +
+                '</div>';
+        }).join('');
+        document.getElementById('pendingListContainer').style.display = 'block';
+    } else {
+        badgeEl.style.display = 'none';
+        listEl.innerHTML = '';
+        document.getElementById('pendingListContainer').style.display = 'none';
+    }
+}
+
+function addAccessRequestNotification(request) {
+    const badgeEl = document.getElementById('pendingBadge');
+    loadPendingRequests();
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification('新的访问申请', { body: 'IP: ' + request.ip + '\n设备: ' + (request.userAgent || '未知') });
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+}
+
+function removeAccessRequestNotification(requestId) {
+    const el = document.getElementById('pending-' + requestId);
+    if (el) el.remove();
+    loadPendingRequests();
+}
+
+async function approveAccess(requestId, type) {
+    try {
+        const res = await fetch('/api/approve-access', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId, type })
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadPendingRequests();
+            loadCertifiedDevices();
+        }
+    } catch (err) {}
+}
+
+async function rejectAccess(requestId) {
+    try {
+        const res = await fetch('/api/reject-access', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadPendingRequests();
+        }
+    } catch (err) {}
+}
+
+async function removeDevice(ip) {
+    if (!confirm('确定要移除设备 ' + ip + ' 的认证吗？')) return;
+    try {
+        const res = await fetch('/api/remove-device', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+        });
+        const data = await res.json();
+        if (data.success) {
+            loadCertifiedDevices();
+        }
+    } catch (err) {}
+}
+
+function refreshDeviceList() {
+    loadCertifiedDevices();
 }

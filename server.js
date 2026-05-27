@@ -313,7 +313,7 @@ function clearFailedLogin(req) {
 const captchaStore = new Map(); // token -> { answer, expires }
 const CAPTCHA_EXPIRE_MS = 5 * 60 * 1000; // 5分钟过期
 const CHECK_FOLDER_PATH = path.join(__dirname, 'check');
-const SLIDE_TOLERANCE = 5; // 允许误差5%
+const SLIDE_TOLERANCE = 3; // 允许误差3%
 
 // 读取check文件夹中的图片
 function getCheckImages() {
@@ -684,6 +684,45 @@ app.get('/login', (req, res) => {
         return res.redirect(getDefaultPage(req.session.user.role));
     }
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// 从monitor访问的自动登录路由（仅允许本地访问）
+app.get('/monitor-auto-login', async (req, res) => {
+    const clientIP = getClientIP(req);
+    // 仅允许本地访问
+    if (!clientIP.includes('127.0.0.1') && 
+        !clientIP.includes('::1') && 
+        !clientIP.includes('localhost') &&
+        clientIP !== '::ffff:127.0.0.1') {
+        return res.status(403).send('Access denied');
+    }
+    
+    // 查找admin用户
+    let adminUser = await database.get('SELECT * FROM users WHERE role = ?', ['admin']);
+    if (!adminUser) {
+        // 如果没有admin用户，查找第一个用户
+        adminUser = await database.get('SELECT * FROM users LIMIT 1');
+    }
+    
+    if (!adminUser) {
+        return res.status(404).send('No admin user found');
+    }
+    
+    // 自动登录为admin用户
+    req.session.user = {
+        id: adminUser.id,
+        employee_id: adminUser.employee_id,
+        name: adminUser.name,
+        role: adminUser.role || 'admin'
+    };
+    req.session.lastActivityAt = Date.now();
+    sessionLastActivity.set(req.sessionID, Date.now());
+    userSessions.set(adminUser.id, { sessionId: req.sessionID, ip: clientIP });
+    
+    logEvent(`[Monitor] 自动登录成功: ${adminUser.name}(${adminUser.employee_id}) [${adminUser.role}]`, req);
+    
+    // 重定向到admin页面
+    res.redirect('/admin');
 });
 
 // 获取滑动验证码
