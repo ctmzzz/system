@@ -1,20 +1,23 @@
 let socket = null;
 let logWorker = null;
+let computeWorker = null;
 let autoScroll = true;
 let currentFilter = 'all';
 let allLogs = [];
-let resourceChart = null;
-let cpuHistory = [];
-let memoryHistory = [];
-let labels = [];
+let chartData = { cpu: [], memory: [], labels: [] };
 let rafId = null;
 let pendingRenderLogs = [];
 let isRenderScheduled = false;
 let perfData = { fps: 60, longTasks: 0, jsHeapSize: 0, domNodes: 0 };
+let chartCtx = null;
+let chartCanvas = null;
+let chartFrameCount = 0;
+let chartDirty = false;
 
 const LOG_ROW_HEIGHT = 22;
 const VISIBLE_BUFFER = 5;
 const MAX_DOM_LOGS = 200;
+const CHART_RENDER_SKIP = 3;
 
 document.addEventListener('DOMContentLoaded', () => {
     initLogin();
@@ -107,19 +110,19 @@ function showMonitor() {
     document.getElementById('loginPage').style.display = 'none';
     document.getElementById('monitorPage').style.display = 'flex';
     initLogWorker();
+    initComputeWorker();
     initSocket();
     initChart();
     initServerControl();
     initBackupBtn();
     loadBackupList();
     initIpManagement();
+    chartRenderLoop();
     
-    // 每 30 秒刷新备份列表
     if (backupRefreshInterval) clearInterval(backupRefreshInterval);
     backupRefreshInterval = setInterval(loadBackupList, 30000);
 }
 
-// 加载备份列表
 async function loadBackupList() {
     try {
         const res = await fetch('/api/backups');
@@ -139,7 +142,6 @@ async function loadBackupList() {
                 </div>
             `).join('');
             
-            // 绑定按钮事件
             listEl.querySelectorAll('.backup-action-btn').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
                     const action = e.target.dataset.action;
@@ -192,18 +194,16 @@ function initLogoutBtn() {
     document.getElementById('logoutBtn').addEventListener('click', () => {
         if (socket) socket.disconnect();
         if (logWorker) logWorker.terminate();
+        if (computeWorker) { computeWorker.postMessage({ type: 'reset' }); computeWorker.terminate(); computeWorker = null; }
         document.getElementById('monitorPage').style.display = 'none';
         document.getElementById('loginPage').style.display = 'flex';
         allLogs = [];
-        cpuHistory = [];
-        memoryHistory = [];
-        labels = [];
+        chartData = { cpu: [], memory: [], labels: [] };
         pendingRenderLogs = [];
         document.getElementById('logsContainer').innerHTML = '';
     });
 }
 
-// 手动备份按钮
 function initBackupBtn() {
     const btn = document.getElementById('manualBackupBtn');
     if (btn) {
@@ -371,61 +371,183 @@ function updateSystemInfo(data) {
     updateChart(data);
 }
 
-function initChart() {
-    const ctx = document.getElementById('resourceChart').getContext('2d');
-    resourceChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [
-                {
-                    label: 'CPU',
-                    data: [],
-                    borderColor: '#6366f1',
-                    backgroundColor: 'rgba(99,102,241,0.08)',
-                    tension: 0.3,
-                    fill: true,
-                    pointRadius: 0,
-                    borderWidth: 2
-                },
-                {
-                    label: '内存',
-                    data: [],
-                    borderColor: '#10b981',
-                    backgroundColor: 'rgba(16,185,129,0.08)',
-                    tension: 0.3,
-                    fill: true,
-                    pointRadius: 0,
-                    borderWidth: 2
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: { duration: 200 },
-            scales: {
-                x: { display: true, grid: { color: 'rgba(148,163,184,0.06)' }, ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } } },
-                y: { display: true, min: 0, max: 100, grid: { color: 'rgba(148,163,184,0.06)' }, ticks: { color: '#64748b', callback: v => v + '%', font: { size: 10 } } }
-            },
-            plugins: { legend: { display: false } },
-            interaction: { intersect: false, mode: 'index' }
+function initComputeWorker() {
+    if (computeWorker) { computeWorker.terminate(); }
+    computeWorker = new Worker('computeWorker.js');
+    computeWorker.onmessage = (e) => {
+        const { type, data } = e.data;
+        if (type === 'chart_data') {
+            chartData = data;
+            chartDirty = true;
         }
-    });
+    };
+}
+
+function initChart() {
+    chartCanvas = document.getElementById('resourceChart');
+    if (!chartCanvas) return;
+    chartCtx = chartCanvas.getContext('2d');
+    resizeChart();
+    window.addEventListener('resize', resizeChart);
+}
+
+function resizeChart() {
+    if (!chartCanvas) return;
+    const rect = chartCanvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    chartCanvas.width = rect.width * dpr;
+    chartCanvas.height = rect.height * dpr;
+    chartCanvas.style.width = rect.width + 'px';
+    chartCanvas.style.height = rect.height + 'px';
+    if (chartCtx) chartCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    chartDirty = true;
+}
+
+function drawChart() {
+    if (!chartCtx || !chartCanvas) return;
+    var w = chartCanvas.width / (window.devicePixelRatio || 1);
+    var h = chartCanvas.height / (window.devicePixelRatio || 1);
+    var ctx = chartCtx;
+
+    ctx.clearRect(0, 0, w, h);
+
+    var cpu = chartData.cpu;
+    var memory = chartData.memory;
+    var labels = chartData.labels;
+    if (!cpu || cpu.length < 2) return;
+
+    var margin = { top: 20, right: 30, bottom: 40, left: 55 };
+    var plotW = w - margin.left - margin.right;
+    var plotH = h - margin.top - margin.bottom;
+
+    ctx.strokeStyle = 'rgba(100, 116, 139, 0.1)';
+    ctx.lineWidth = 1;
+    for (var i = 0; i <= 4; i++) {
+        var y = margin.top + (plotH / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(w - margin.right, y);
+        ctx.stroke();
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '12px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText((100 - i * 25) + '%', margin.left - 10, y + 4);
+    }
+
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.3)';
+    ctx.beginPath();
+    ctx.moveTo(margin.left, margin.top);
+    ctx.lineTo(margin.left, h - margin.bottom);
+    ctx.moveTo(margin.left, h - margin.bottom);
+    ctx.lineTo(w - margin.right, h - margin.bottom);
+    ctx.stroke();
+
+    var step = Math.max(1, Math.floor(labels.length / 6));
+    for (var i = 0; i < labels.length; i += step) {
+        var x = margin.left + (plotW / (cpu.length - 1)) * i;
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px "Microsoft YaHei", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(labels[i], x, h - 20);
+    }
+
+    function drawSmoothLine(data, color, glowColor) {
+        if (!data || data.length < 2) return;
+        
+        var points = [];
+        for (var i = 0; i < data.length; i++) {
+            points.push({
+                x: margin.left + (plotW / (data.length - 1)) * i,
+                y: margin.top + plotH - (data[i] / 100) * plotH
+            });
+        }
+
+        var gradient = ctx.createLinearGradient(0, margin.top, 0, margin.top + plotH);
+        gradient.addColorStop(0, color + '30');
+        gradient.addColorStop(0.5, color + '15');
+        gradient.addColorStop(1, color + '05');
+
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (var j = 1; j < points.length; j++) {
+            var xc = (points[j].x + points[j - 1].x) / 2;
+            var yc = (points[j].y + points[j - 1].y) / 2;
+            ctx.quadraticCurveTo(points[j - 1].x, points[j - 1].y, xc, yc);
+        }
+        ctx.quadraticCurveTo(points[points.length - 1].x, points[points.length - 1].y, points[points.length - 1].x, points[points.length - 1].y);
+
+        ctx.save();
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.lineTo(points[points.length - 1].x, h - margin.bottom);
+        ctx.lineTo(points[0].x, h - margin.bottom);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        return points[points.length - 1];
+    }
+
+    var lastMem = drawSmoothLine(memory, '#10b981', '#10b98180');
+    var lastCpu = drawSmoothLine(cpu, '#3b82f6', '#3b82f680');
+
+    if (lastCpu) {
+        ctx.save();
+        ctx.shadowColor = '#3b82f6';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(lastCpu.x, lastCpu.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#3b82f6';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(lastCpu.x, lastCpu.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.restore();
+    }
+
+    if (lastMem) {
+        ctx.save();
+        ctx.shadowColor = '#10b981';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(lastMem.x, lastMem.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#10b981';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(lastMem.x, lastMem.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.restore();
+    }
 }
 
 function updateChart(data) {
-    if (!resourceChart) return;
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    labels.push(timeStr);
-    cpuHistory.push(data.cpu ? data.cpu.usage : 0);
-    memoryHistory.push(data.memory ? data.memory.usage : 0);
-    if (labels.length > 60) { labels.shift(); cpuHistory.shift(); memoryHistory.shift(); }
-    resourceChart.data.labels = labels;
-    resourceChart.data.datasets[0].data = cpuHistory;
-    resourceChart.data.datasets[1].data = memoryHistory;
-    resourceChart.update('none');
+    if (!data || !data.cpu || !data.memory) return;
+    var now = new Date();
+    var timeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    if (computeWorker) {
+        computeWorker.postMessage({
+            type: 'add_point',
+            data: { cpu: data.cpu.usage, memory: data.memory.usage, label: timeStr }
+        });
+    }
+}
+
+function chartRenderLoop() {
+    chartFrameCount++;
+    if (chartDirty && chartFrameCount % CHART_RENDER_SKIP === 0) {
+        drawChart();
+        chartDirty = false;
+    }
+    requestAnimationFrame(chartRenderLoop);
 }
 
 function scheduleRender() {
@@ -501,7 +623,6 @@ function initServerControl() {
             const res = await fetch('/api/server-status');
             const data = await res.json();
             
-            // 更新主服务器状态
             if (data.running) {
                 statusEl.innerHTML = '<span class="status-dot online"></span> 状态: 运行中';
                 toggleBtn.textContent = '停止';
@@ -565,7 +686,6 @@ function initClearBtn() {
     });
 }
 
-// IP管理初始化
 function initIpManagement() {
     const toggleBtn = document.getElementById('toggleIpList');
     if (toggleBtn) {
@@ -579,14 +699,11 @@ function initIpManagement() {
         });
     }
     
-    // 初始加载一次锁定IP
     loadLockedIps();
     
-    // 每5秒刷新IP列表
     setInterval(loadLockedIps, 5000);
 }
 
-// 加载锁定IP列表
 async function loadLockedIps() {
     try {
         const res = await fetch('/api/locked-ips');
@@ -597,7 +714,6 @@ async function loadLockedIps() {
     } catch (err) {}
 }
 
-// 解锁IP
 async function unlockIp(ip) {
     try {
         const res = await fetch('/api/unlock-ip', {

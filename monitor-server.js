@@ -123,6 +123,70 @@ let workerPoolStats = null;
 let lastCpuUsage = process.cpuUsage();
 let lastCpuTime = Date.now();
 
+let psCachedCpu = 0;
+let psCachedMemPercent = 0;
+let psCachedMemTotal = 0;
+let psCachedMemUsed = 0;
+let psCachedMemFree = 0;
+let psProcess = null;
+let cachedDisk = null;
+let cachedNetwork = null;
+let cachedOsInfo = null;
+let lastDiskFetch = 0;
+const SLOW_FETCH_INTERVAL = 30000;
+
+function startPsMonitor() {
+    const psScript = path.join(__dirname, 'monitor.ps1');
+    if (!fs.existsSync(psScript)) {
+        addLog('monitor.ps1 未找到，回退到 systeminformation 采集', 'warning');
+        return;
+    }
+    try {
+        psProcess = spawn('powershell.exe', [
+            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-File', psScript
+        ], {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        let buffer = '';
+        psProcess.stdout.on('data', (data) => {
+            buffer += data.toString();
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed === 'ERROR') continue;
+                const parts = trimmed.split(',');
+                if (parts.length >= 5) {
+                    psCachedCpu = parseFloat(parts[0]) || 0;
+                    psCachedMemPercent = parseFloat(parts[1]) || 0;
+                    psCachedMemTotal = parseFloat(parts[2]) || 0;
+                    psCachedMemUsed = parseFloat(parts[3]) || 0;
+                    psCachedMemFree = parseFloat(parts[4]) || 0;
+                }
+            }
+        });
+
+        psProcess.stderr.on('data', () => {});
+
+        psProcess.on('close', (code) => {
+            addLog(`PS 监控进程退出 (code: ${code})，5秒后重启`, 'warning');
+            psProcess = null;
+            setTimeout(startPsMonitor, 5000);
+        });
+
+        psProcess.on('error', (err) => {
+            addLog(`PS 监控进程错误: ${err.message}`, 'error');
+            psProcess = null;
+        });
+
+        addLog('PowerShell 持久监控进程已启动', 'info');
+    } catch (err) {
+        addLog(`启动 PS 监控失败: ${err.message}`, 'error');
+    }
+}
+
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -499,15 +563,46 @@ async function getSystemInfo() {
         // 获取主服务器数据库状态
         await fetchMainDbStatus();
 
-        const [cpuLoad, memLoad, diskLoad, networkStats, osInfo] = await Promise.all([
-            si.currentLoad(),
-            si.mem(),
-            si.fsSize(),
-            si.networkStats(),
-            si.osInfo()
-        ]);
-
         const now = Date.now();
+
+        let cpuUsagePercent = psCachedCpu;
+        let memData = {
+            used: psCachedMemUsed,
+            total: psCachedMemTotal,
+            usage: psCachedMemPercent,
+            free: psCachedMemFree
+        };
+
+        if (!psProcess || psCachedCpu === 0) {
+            try {
+                const [cpuLoad, memLoad] = await Promise.all([
+                    si.currentLoad(),
+                    si.mem()
+                ]);
+                cpuUsagePercent = parseFloat(cpuLoad.currentLoad.toFixed(1));
+                memData = {
+                    used: parseFloat((memLoad.used / 1024 / 1024 / 1024).toFixed(2)),
+                    total: parseFloat((memLoad.total / 1024 / 1024 / 1024).toFixed(2)),
+                    usage: parseFloat(((memLoad.used / memLoad.total) * 100).toFixed(1)),
+                    free: parseFloat((memLoad.free / 1024 / 1024 / 1024).toFixed(2))
+                };
+            } catch (e) {}
+        }
+
+        if (!cachedDisk || !cachedNetwork || !cachedOsInfo || now - lastDiskFetch > SLOW_FETCH_INTERVAL) {
+            try {
+                const [diskLoad, networkStats, osInfo] = await Promise.all([
+                    si.fsSize(),
+                    si.networkStats(),
+                    si.osInfo()
+                ]);
+                cachedDisk = diskLoad;
+                cachedNetwork = networkStats;
+                cachedOsInfo = osInfo;
+                lastDiskFetch = now;
+            } catch (e) {}
+        }
+
         const elapsed = now - lastCpuTime;
         const cpuUsage = process.cpuUsage(lastCpuUsage);
         const processCpuPercent = elapsed > 0
@@ -524,31 +619,26 @@ async function getSystemInfo() {
             dbHost: mainDbConfig.host,
             dbPort: mainDbConfig.port,
             cpu: {
-                usage: parseFloat(cpuLoad.currentLoad.toFixed(1)),
-                cores: cpuLoad.cpus.length,
-                model: cpuLoad.cpus[0] ? cpuLoad.cpus[0].model : 'Unknown'
+                usage: cpuUsagePercent,
+                cores: os.cpus().length,
+                model: os.cpus()[0] ? os.cpus()[0].model : 'Unknown'
             },
-            memory: {
-                used: parseFloat((memLoad.used / 1024 / 1024 / 1024).toFixed(2)),
-                total: parseFloat((memLoad.total / 1024 / 1024 / 1024).toFixed(2)),
-                usage: parseFloat(((memLoad.used / memLoad.total) * 100).toFixed(1)),
-                free: parseFloat((memLoad.free / 1024 / 1024 / 1024).toFixed(2))
-            },
-            disk: diskLoad[0] ? {
-                used: parseFloat((diskLoad[0].used / 1024 / 1024 / 1024).toFixed(2)),
-                total: parseFloat((diskLoad[0].size / 1024 / 1024 / 1024).toFixed(2)),
-                usage: parseFloat(diskLoad[0].use.toFixed(1))
+            memory: memData,
+            disk: cachedDisk && cachedDisk[0] ? {
+                used: parseFloat((cachedDisk[0].used / 1024 / 1024 / 1024).toFixed(2)),
+                total: parseFloat((cachedDisk[0].size / 1024 / 1024 / 1024).toFixed(2)),
+                usage: parseFloat(cachedDisk[0].use.toFixed(1))
             } : null,
-            network: networkStats[0] ? {
-                rx: parseFloat((networkStats[0].rx_sec / 1024).toFixed(1)),
-                tx: parseFloat((networkStats[0].tx_sec / 1024).toFixed(1))
+            network: cachedNetwork && cachedNetwork[0] ? {
+                rx: parseFloat((cachedNetwork[0].rx_sec / 1024).toFixed(1)),
+                tx: parseFloat((cachedNetwork[0].tx_sec / 1024).toFixed(1))
             } : null,
-            os: {
-                platform: osInfo.platform,
-                distro: osInfo.distro,
-                hostname: osInfo.hostname,
-                uptime: osInfo.uptime
-            },
+            os: cachedOsInfo ? {
+                platform: cachedOsInfo.platform,
+                distro: cachedOsInfo.distro,
+                hostname: cachedOsInfo.hostname,
+                uptime: cachedOsInfo.uptime
+            } : null,
             process: {
                 cpu: parseFloat(processCpuPercent),
                 memory: {
@@ -803,6 +893,7 @@ io.on('connection', (socket) => {
 
 async function startServer() {
     await initDatabase();
+    startPsMonitor();
     spawnMainServer();
     initLogWatchers();
     startResourceCollection();
