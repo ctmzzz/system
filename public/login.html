@@ -1126,6 +1126,121 @@
         .slide-captcha-overlay.success .overlay-text {
             color: #4ade80;
         }
+
+        /* 非法访问警示弹窗 */
+        .illegal-access-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .illegal-access-modal.active {
+            display: flex;
+        }
+
+        .illegal-access-box {
+            position: relative;
+            background: linear-gradient(135deg, rgba(30, 0, 0, 0.98), rgba(15, 0, 0, 0.99));
+            border-radius: 20px;
+            padding: 48px 40px;
+            width: 420px;
+            max-width: 90%;
+            border: 2px solid rgba(239, 68, 68, 0.5);
+            box-shadow: 
+                0 0 60px rgba(239, 68, 68, 0.3),
+                0 20px 60px rgba(0, 0, 0, 0.6);
+            text-align: center;
+            animation: shake 0.5s ease, pulse 2s ease-in-out infinite;
+        }
+
+        .illegal-access-icon {
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(185, 28, 28, 0.3));
+            border: 3px solid rgba(239, 68, 68, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ef4444;
+            animation: iconPulse 1.5s ease-in-out infinite;
+        }
+
+        .illegal-access-icon svg {
+            width: 56px;
+            height: 56px;
+        }
+
+        .illegal-access-title {
+            font-size: 32px;
+            font-weight: 800;
+            color: #ef4444;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            text-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+            animation: titleFlash 0.8s ease-in-out infinite;
+        }
+
+        .illegal-access-text {
+            font-size: 16px;
+            color: rgba(248, 250, 252, 0.85);
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+
+        .illegal-access-btn {
+            width: 100%;
+            padding: 16px 32px;
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+        }
+
+        .illegal-access-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(239, 68, 68, 0.6);
+        }
+
+        .illegal-access-btn:active {
+            transform: translateY(0);
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 60px rgba(239, 68, 68, 0.3), 0 20px 60px rgba(0, 0, 0, 0.6); }
+            50% { box-shadow: 0 0 80px rgba(239, 68, 68, 0.5), 0 20px 60px rgba(0, 0, 0, 0.6); }
+        }
+
+        @keyframes iconPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        @keyframes titleFlash {
+            0%, 100% { opacity: 1; text-shadow: 0 0 20px rgba(239, 68, 68, 0.5); }
+            50% { opacity: 0.8; text-shadow: 0 0 40px rgba(239, 68, 68, 0.8); }
+        }
     </style>
     <script>
         (function () {
@@ -1876,6 +1991,23 @@
                 loginBtn.textContent = '登 录';
             }
 
+            // 非法访问警示弹窗
+            function showIllegalAccessModal() {
+                const modal = document.getElementById('illegalAccessModal');
+                if (modal) {
+                    modal.classList.add('active');
+                }
+            }
+
+            function closeIllegalAccessModal() {
+                const modal = document.getElementById('illegalAccessModal');
+                if (modal) {
+                    modal.classList.remove('active');
+                }
+                loginBtn.disabled = false;
+                loginBtn.textContent = '登 录';
+            }
+
             function startDrag(e) {
                 isDragging = true;
                 startX = e.type === 'mousedown' ? e.clientX : e.touches[0].clientX;
@@ -2038,9 +2170,13 @@
                             }
                         }
                     } else {
-                        showError(data.message || '登录失败');
-                        loginBtn.disabled = false;
-                        loginBtn.textContent = '登 录';
+                        if (data.adminBlocked) {
+                            showIllegalAccessModal();
+                        } else {
+                            showError(data.message || '登录失败');
+                            loginBtn.disabled = false;
+                            loginBtn.textContent = '登 录';
+                        }
                     }
                 } catch (err) {
                     showError('网络错误，请稍后重试');
@@ -2061,6 +2197,12 @@
 
             if (employeeIdInput) {
                 employeeIdInput.focus();
+            }
+
+            // 非法访问弹窗关闭按钮
+            const illegalAccessCloseBtn = document.getElementById('illegalAccessCloseBtn');
+            if (illegalAccessCloseBtn) {
+                illegalAccessCloseBtn.addEventListener('click', closeIllegalAccessModal);
             }
         });
 
@@ -2345,6 +2487,22 @@
                 </div>
             </div>
             <div class="slide-captcha-refresh" id="slideCaptchaRefresh">刷新</div>
+        </div>
+    </div>
+
+    <!-- 非法访问警示弹窗 -->
+    <div id="illegalAccessModal" class="illegal-access-modal">
+        <div class="illegal-access-box">
+            <div class="illegal-access-icon">
+                <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                    <line x1="12" y1="8" x2="12" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="illegal-access-title">非法访问</div>
+            <div class="illegal-access-text">管理员账号禁止在此页面登录</div>
+            <button id="illegalAccessCloseBtn" class="illegal-access-btn">我知道了</button>
         </div>
     </div>
 </body>

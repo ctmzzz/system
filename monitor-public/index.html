@@ -84,7 +84,7 @@
                 </div>
                 <a id="goToAdminBtn" class="go-to-admin-btn" href="http://localhost:3001/monitor-auto-login" target="_blank">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
                         <circle cx="12" cy="12" r="3"/>
                     </svg>
                     管理后台
@@ -102,7 +102,7 @@
 
         <main class="dashboard">
             <div class="cards-row">
-                <div class="card combined-card" style="grid-column: span 2;">
+                <div class="card combined-card">
                     <div class="card-header">
                         <div class="card-icon combined-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -162,7 +162,7 @@
                     </div>
                 </div>
 
-                <div class="card db-card" style="flex: 2; max-width: 400px;">
+                <div class="card db-card">
                     <div class="card-header">
                         <div class="card-icon db-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -179,7 +179,7 @@
                     <div class="card-detail" id="dbHost">MySQL localhost:3306</div>
                     <div class="backup-controls">
                         <button id="manualBackupBtn" class="backup-btn">手动备份</button>
-                        <span class="auto-backup-info" id="autoBackupInfo">自动备份: 每天 22:00</span>
+                        <span class="auto-backup-info" id="autoBackupInfo">自动备份: 每天 6:00、22:00</span>
                     </div>
                     <div class="backup-list-container">
                         <h4 class="backup-list-title">备份历史</h4>
@@ -205,7 +205,9 @@
                         <button id="serverToggleBtn" class="server-toggle-btn">启动</button>
                     </div>
                 </div>
+            </div>
 
+            <div class="cards-row">
                 <div class="card alert-card" id="alertCard">
                     <div class="card-header">
                         <div class="card-icon alert-icon">

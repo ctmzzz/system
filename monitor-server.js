@@ -1122,7 +1122,50 @@ function readNewLines(fileInfo) {
 }
 
 let mainServerProcess = null;
+let proxyProcess = null;
 let mainServerDbConnected = false;
+
+function spawnProxyServer() {
+    const proxyScript = path.join(__dirname, 'proxy.js');
+    addLog('正在启动反向代理服务器 (node proxy.js)...', 'info');
+    
+    proxyProcess = spawn('node', [proxyScript], {
+        cwd: __dirname,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env }
+    });
+
+    proxyProcess.stdout.on('data', (data) => {
+        const lines = data.toString().split(/\r?\n/).filter(l => l.trim());
+        lines.forEach(l => {
+            const log = classifyLog(l, 'proxy');
+            serverLogs.push(log);
+            if (serverLogs.length > MAX_LOGS) serverLogs.shift();
+            io.emit('new_log', log);
+        });
+    });
+
+    proxyProcess.stderr.on('data', (data) => {
+        const lines = data.toString().split(/\r?\n/).filter(l => l.trim());
+        lines.forEach(l => {
+            const log = classifyLog(l, 'proxy-error');
+            serverLogs.push(log);
+            if (serverLogs.length > MAX_LOGS) serverLogs.shift();
+            io.emit('new_log', log);
+        });
+    });
+
+    proxyProcess.on('error', (err) => {
+        addLog(`反向代理启动失败: ${err.message}`, 'error');
+    });
+
+    proxyProcess.on('close', (code) => {
+        addLog(`反向代理已退出 (code: ${code})`, 'warning');
+        proxyProcess = null;
+    });
+
+    addLog('反向代理进程已启动', 'success');
+}
 
 function spawnMainServer() {
     const serverScript = path.join(__dirname, 'server.js');
@@ -1317,6 +1360,7 @@ async function startServer() {
     await initDatabase();
     startPsMonitor();
     spawnMainServer();
+    spawnProxyServer();
     initLogWatchers();
     startResourceCollection();
     startAbnormalCheck();

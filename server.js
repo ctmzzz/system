@@ -155,7 +155,7 @@ function getLocalIP() {
 const LOCAL_IP = getLocalIP();
 
 // 带时间戳的日志函数（使用本地时间，非 UTC）
-function logEvent(msg, req, extra = '') {
+function logEvent(msg, req, extra = '', level = 'info') {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const time = now.getFullYear() + '-' +
@@ -166,7 +166,13 @@ function logEvent(msg, req, extra = '') {
         pad(now.getSeconds());
     const user = req && req.session && req.session.user ? `${req.session.user.name}(${req.session.user.employee_id}/${req.session.user.role})` : '未登录';
     const ip = req ? (req.ip || req.connection.remoteAddress || '?') : '?';
-    console.log(`[${time}] [${ip}] [${user}] ${msg} ${extra}`.trim());
+    const logMsg = `[${time}] [${ip}] [${user}] ${msg} ${extra}`.trim();
+    if (level === 'warn') {
+        // 添加 [警告] 关键词，让 monitor 能正确识别为警告级别
+        console.warn(`[警告] ${logMsg}`);
+    } else {
+        console.log(logMsg);
+    }
 }
 
 // ===== 会话空闲超时：超过此时长无操作须重新登录（关闭浏览器后仅 cookie 仍存活时，下次请求也会被判超时） =====
@@ -255,6 +261,21 @@ const upload = multer({
 
 // 静态服务：图片目录
 app.use('/leave-images', express.static(IMAGE_DIR));
+
+// ===== 访问控制：只允许通过反向代理访问 =====
+app.use((req, res, next) => {
+    const clientIP = req.ip || req.connection.remoteAddress;
+    const isLocalRequest = clientIP === '127.0.0.1' || clientIP === '::1' || clientIP === '::ffff:127.0.0.1';
+    const isFromProxy = req.headers['x-forwarded-for'] || req.headers['x-real-ip'];
+    
+    if (!isLocalRequest && !isFromProxy) {
+        console.warn(`[安全] 拒绝直接访问 3001 端口: ${clientIP}`);
+        // 直接关闭连接，模拟连接失败
+        res.destroy();
+        return;
+    }
+    next();
+});
 
 // 中间件
 app.use(express.json({ limit: '10mb' }));
@@ -391,7 +412,7 @@ function recordAccountFailed(employee_id) {
     record.count++;
     record.lastAttempt = Date.now();
     accountFailedAttempts.set(employee_id, record);
-    console.log('[安全] 账号 ' + employee_id + ' 登录失败 ' + record.count + ' 次');
+    console.warn('[警告] 账号 ' + employee_id + ' 登录失败 ' + record.count + ' 次');
 }
 
 function getAccountFailedCount(employee_id) {
@@ -447,13 +468,13 @@ function recordCaptchaFailed(ip) {
         record.lockTime = Date.now();
         record.lockFailCount = record.totalFails;
         record.reason = '累计验证码验证失败次数过多';
-        console.log('[安全] IP已锁定(' + record.totalFails + '次累计失败): ' + ip + ' 原因: ' + record.reason);
+        console.warn('[警告] IP已锁定(' + record.totalFails + '次累计失败): ' + ip + ' 原因: ' + record.reason);
         record.captchaFails = 0;
         record.totalFails = 0;
         record.cooldownUntil = 0;
     } else if (record.captchaFails >= CAPTCHA_FAIL_COOLDOWN_THRESHOLD) {
         record.cooldownUntil = Date.now() + COOLDOWN_TIME_MS;
-        console.log('[安全] IP进入冷却(' + record.captchaFails + '/' + record.totalFails + '次失败): ' + ip + ' 冷却结束: ' + new Date(record.cooldownUntil).toLocaleString());
+        console.warn('[警告] IP进入冷却(' + record.captchaFails + '/' + record.totalFails + '次失败): ' + ip + ' 冷却结束: ' + new Date(record.cooldownUntil).toLocaleString());
     }
 }
 
@@ -908,6 +929,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     if (!user) {
         recordFailedLogin(req);
         recordAccountFailed(employee_id);
+        logEvent(`登录失败（账号不存在）: ${employee_id}`, req, '', 'warn');
         if (getAccountFailedCount(employee_id) >= FREEZE_THRESHOLD) {
             return res.status(403).json({ success: false, message: '账户已被冻结，请联系管理员' });
         }
@@ -919,6 +941,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     if (!isMatch) {
         recordFailedLogin(req);
         recordAccountFailed(employee_id);
+        logEvent(`登录失败（密码错误）: ${employee_id}`, req, '', 'warn');
         if (getAccountFailedCount(employee_id) >= FREEZE_THRESHOLD) {
             freezeAccount(employee_id, user.id, user.name);
             return res.status(403).json({ success: false, message: '账户已被冻结，请联系管理员' });
@@ -928,6 +951,11 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
 
     clearFailedLogin(req);
     clearAccountFailed(employee_id);
+
+    if (user.role === 'admin') {
+        logEvent('管理员账号 ' + user.name + '(' + employee_id + ') 尝试从登录页面登录，已被拦截', req, '', 'warn');
+        return res.status(403).json({ success: false, message: '非法访问', adminBlocked: true });
+    }
 
     const userRole = user.role || 'teacher';
     // 确定最大会话数
@@ -987,7 +1015,7 @@ async function findOrCreateClass(classNo) {
 function freezeAccount(employee_id, userId, name) {
     if (!abnormalAccounts.has(employee_id)) {
         abnormalAccounts.set(employee_id, { userId, name, time: new Date() });
-        console.log('[安全] 账号 ' + name + '(' + employee_id + ') 已被冻结（失败次数过多）');
+        console.warn('[警告] 账号 ' + name + '(' + employee_id + ') 已被冻结（失败次数过多）');
         logEvent('账号 ' + name + '(' + employee_id + ') 因失败次数过多被冻结', { ip: 'system' });
     }
 }
@@ -6460,6 +6488,7 @@ async function startServer() {
         console.log('  内存限制: ' + (v8.getHeapStatistics().heap_size_limit / 1048576).toFixed(0) + 'MB');
         console.log('=========================================');
         console.log('默认管理员: admin / admin123');
+        console.log('[安全] 3001端口已限制，仅允许通过反向代理访问');
         
         // 每10分钟打印一次内存使用情况
         setInterval(() => {
@@ -6468,6 +6497,97 @@ async function startServer() {
             const sessionCount = sessions ? Object.keys(sessions).length : 0;
             console.log(`[内存] 堆:${(used.heapUsed/1048576).toFixed(1)}MB/${(used.heapTotal/1048576).toFixed(1)}MB | RSS:${(used.rss/1048576).toFixed(1)}MB | 外部:${(used.external/1048576).toFixed(1)}MB | Session:${sessionCount}`);
         }, 10 * 60 * 1000);
+        
+        // ===== 定时备份：每天6点和22点 =====
+        function scheduleBackup() {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            
+            // 计算下次备份时间
+            let nextBackupHour = 6;
+            if (currentHour >= 6 && currentHour < 22) {
+                nextBackupHour = 22;
+            }
+            
+            let nextBackup = new Date(now);
+            nextBackup.setHours(nextBackupHour, 0, 0, 0);
+            
+            // 如果今天的时间已过，安排到明天
+            if (nextBackup <= now) {
+                nextBackup.setDate(nextBackup.getDate() + 1);
+            }
+            
+            const delay = nextBackup.getTime() - now.getTime();
+            const nextBackupStr = nextBackup.toLocaleString();
+            
+            console.log(`[备份] 下次备份计划: ${nextBackupStr}`);
+            
+            setTimeout(async () => {
+                console.log('[备份] 开始自动备份...');
+                try {
+                    const { getPool, DB_CONFIG: bakDB_CONFIG } = require('./database-mysql');
+                    const DB_CONFIG = bakDB_CONFIG || { host: 'localhost', port: 3306, user: 'root', password: '123456', database: 'score_analysis' };
+                    const pool = getPool();
+                    const BACKUP_DIR = path.join(__dirname, 'database');
+                    if (!fs.existsSync(BACKUP_DIR)) {
+                        fs.mkdirSync(BACKUP_DIR, { recursive: true });
+                    }
+                    
+                    const backupTime = new Date();
+                    const dateStr = `${backupTime.getFullYear()}${String(backupTime.getMonth() + 1).padStart(2, '0')}${String(backupTime.getDate()).padStart(2, '0')}_${String(backupTime.getHours()).padStart(2, '0')}${String(backupTime.getMinutes()).padStart(2, '0')}${String(backupTime.getSeconds()).padStart(2, '0')}`;
+                    const backupFile = path.join(BACKUP_DIR, `${dateStr}.sql`);
+                    
+                    const conn = await pool.getConnection();
+                    let sqlContent = `-- 备份时间: ${backupTime.toLocaleString()}\n`;
+                    sqlContent += `-- 数据库: ${DB_CONFIG.database}\n`;
+                    sqlContent += `-- 主机: ${DB_CONFIG.host}:${DB_CONFIG.port}\n\n`;
+                    sqlContent += `SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";\n`;
+                    sqlContent += `SET AUTOCOMMIT = 0;\n`;
+                    sqlContent += `START TRANSACTION;\n`;
+                    sqlContent += `SET time_zone = "+00:00";\n\n`;
+                    sqlContent += `CREATE DATABASE IF NOT EXISTS \`${DB_CONFIG.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n`;
+                    sqlContent += `USE \`${DB_CONFIG.database}\`;\n\n`;
+                    
+                    const [tables] = await conn.query('SHOW TABLES');
+                    for (const tableObj of tables) {
+                        const tableName = Object.values(tableObj)[0];
+                        sqlContent += `-- 表: ${tableName}\n`;
+                        const [createTable] = await conn.query(`SHOW CREATE TABLE \`${tableName}\``);
+                        sqlContent += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
+                        sqlContent += `${createTable[0]['Create Table']};\n\n`;
+                        
+                        const [rows] = await conn.query(`SELECT * FROM \`${tableName}\``);
+                        if (rows.length > 0) {
+                            sqlContent += `LOCK TABLES \`${tableName}\` WRITE;\n`;
+                            for (const row of rows) {
+                                const values = Object.values(row).map(v => {
+                                    if (v === null) return 'NULL';
+                                    if (typeof v === 'number') return v;
+                                    const str = String(v);
+                                    return `'${str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\x00/g, '\\0')}'`;
+                                });
+                                sqlContent += `INSERT INTO \`${tableName}\` VALUES (${values.join(', ')});\n`;
+                            }
+                            sqlContent += `UNLOCK TABLES;\n\n`;
+                        }
+                    }
+                    sqlContent += 'COMMIT;\n';
+                    
+                    fs.writeFileSync(backupFile, sqlContent, 'utf8');
+                    conn.release();
+                    console.log(`[备份] 自动备份完成: ${path.basename(backupFile)} (${(fs.statSync(backupFile).size / 1024).toFixed(2)} KB)`);
+                } catch (err) {
+                    console.error('[备份] 自动备份失败:', err);
+                }
+                
+                // 安排下一次备份
+                scheduleBackup();
+            }, delay);
+        }
+        
+        scheduleBackup();
+        console.log('[备份] 定时备份功能已启用（每天6:00 和 22:00）');
     });
 }
 
