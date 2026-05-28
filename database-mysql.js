@@ -2,10 +2,10 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 
 const DB_CONFIG = {
-    host: 'localhost',
+    host: '192.168.3.6',
     port: 3306,
     user: 'root',
-    password: '123456',
+    password: 'Saodiseng1',
     database: 'score_analysis',
     waitForConnections: true,
     connectionLimit: 50,
@@ -39,7 +39,7 @@ async function initDatabase() {
     await initConn.end();
 
     pool = mysql.createPool(DB_CONFIG);
-    console.log('MySQL 连接成功 (127.0.0.1)');
+    console.log('MySQL 连接成功');
 
     await createAllTables();
 
