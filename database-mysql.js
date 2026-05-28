@@ -1,16 +1,17 @@
+require('dotenv').config();
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 
 const DB_CONFIG = {
-    host: '192.168.3.6',
-    port: 3306,
-    user: 'root',
-    password: 'Saodiseng1',
-    database: 'score_analysis',
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT, 10) || 3306,
+    user: process.env.DB_USER || 'score_user',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'score_analysis',
     waitForConnections: true,
     connectionLimit: 50,
     queueLimit: 100,
-    decimalNumbers: true,  // 让 DECIMAL 返回数字而非字符串
+    decimalNumbers: true,
     acquireTimeout: 60000,
     timeout: 60000,
     reconnect: true,
@@ -45,9 +46,12 @@ async function initDatabase() {
 
     const [rows] = await pool.execute('SELECT COUNT(*) AS count FROM users');
     if (rows[0].count === 0) {
-        const hp = bcrypt.hashSync('admin123', 10);
-        await pool.execute('INSERT INTO users (employee_id, password, name, role) VALUES (?, ?, ?, ?)', ['admin', hp, '管理员', 'admin']);
-        console.log('已创建默认管理员账号: admin / admin123');
+        const defaultPass = process.env.DEFAULT_ADMIN_PASS || 'admin123';
+        const defaultUser = process.env.DEFAULT_ADMIN_USER || 'admin';
+        const hp = bcrypt.hashSync(defaultPass, 10);
+        await pool.execute('INSERT INTO users (employee_id, password, plain_password, name, role) VALUES (?, ?, ?, ?, ?)',
+            [defaultUser, hp, defaultPass, '管理员', 'admin']);
+        console.log('已创建默认管理员账号');
     }
     console.log('数据库初始化完成');
 }
@@ -69,13 +73,13 @@ async function createAllTables() {
         `CREATE TABLE IF NOT EXISTS teacher_course_hours (id INT AUTO_INCREMENT PRIMARY KEY, teacher_employee_id VARCHAR(50) DEFAULT '', teacher_name VARCHAR(100) NOT NULL, subject VARCHAR(100) DEFAULT '', class_name VARCHAR(100) DEFAULT '', course_date VARCHAR(20) DEFAULT '', weekday VARCHAR(20) DEFAULT '', period_no VARCHAR(50) DEFAULT '', hours DECIMAL(10,2) DEFAULT 1, source_file VARCHAR(255) DEFAULT '', imported_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX idx_tch_teacher (teacher_employee_id, teacher_name), INDEX idx_tch_date (course_date), INDEX idx_tch_subject (subject)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
         `CREATE TABLE IF NOT EXISTS substitute_teachers (id INT AUTO_INCREMENT PRIMARY KEY, teacher_name VARCHAR(100) NOT NULL UNIQUE, can_substitute TINYINT(1) DEFAULT 1, current_assignments TEXT, source_file VARCHAR(255) DEFAULT '', updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
         `CREATE TABLE IF NOT EXISTS substitute_requests (id INT AUTO_INCREMENT PRIMARY KEY, activity_type VARCHAR(50) DEFAULT '社团', course_name VARCHAR(200) DEFAULT '', course_date VARCHAR(20) DEFAULT '', original_teacher VARCHAR(100) NOT NULL, substitute_teacher VARCHAR(100) NOT NULL, reason VARCHAR(255) DEFAULT '', location VARCHAR(200) DEFAULT '', notes TEXT, requested_by VARCHAR(100) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, INDEX idx_sub_date (course_date), INDEX idx_sub_teacher (substitute_teacher), INDEX idx_sub_original (original_teacher)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-        `CREATE TABLE IF NOT EXISTS club_activity_sessions (id INT AUTO_INCREMENT PRIMARY KEY, activity_type VARCHAR(50) DEFAULT '社团', course_name VARCHAR(200) DEFAULT '', course_date VARCHAR(20) DEFAULT '', scheduled_teacher VARCHAR(100) DEFAULT '', substitute_teacher VARCHAR(100) DEFAULT '', location VARCHAR(200) DEFAULT '', source_file VARCHAR(255) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_club_session (course_date, course_name, scheduled_teacher), INDEX idx_club_date (course_date), INDEX idx_club_course (course_name), INDEX idx_club_teacher (scheduled_teacher)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+        `CREATE TABLE IF NOT EXISTS club_activity_sessions (id INT AUTO_INCREMENT PRIMARY KEY, activity_type VARCHAR(50) DEFAULT '社团', course_name VARCHAR(200) DEFAULT '', course_date VARCHAR(20) DEFAULT '', scheduled_teacher VARCHAR(100) DEFAULT '', substitute_teacher VARCHAR(100) DEFAULT '', location VARCHAR(200) DEFAULT '', source_file VARCHAR(255) DEFAULT '', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_club_session (course_date, course_name, scheduled_teacher), INDEX idx_club_date (course_date), INDEX idx_club_course (course_name), INDEX idx_club_teacher (scheduled_teacher)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+        `CREATE TABLE IF NOT EXISTS sessions (session_id VARCHAR(128) NOT NULL, expires INT UNSIGNED NOT NULL, data MEDIUMTEXT, PRIMARY KEY (session_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     ];
     for (const sql of tables) {
         await pool.execute(normalizeSQL(sql));
     }
     console.log('所有表创建完成');
-    // 补缺失列
     try { await pool.execute("ALTER TABLE users ADD COLUMN plain_password VARCHAR(255)"); } catch(e) {}
     try { await pool.execute("ALTER TABLE attendance ADD COLUMN absent_time VARCHAR(50) DEFAULT ''"); } catch(e) {}
     try { await pool.execute("ALTER TABLE homework ADD COLUMN class_id INT DEFAULT NULL"); } catch(e) {}

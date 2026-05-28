@@ -224,7 +224,6 @@ function editUser(id, employeeId, name, role, plainPassword) {
     document.getElementById('userNameInput').value = name;
     document.getElementById('userPassword').value = plainPassword;
     document.getElementById('userRole').value = role;
-    // 更新提示文字
     onUserRoleChange();
     openModal('userModal');
 }

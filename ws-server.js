@@ -23,7 +23,7 @@ function createWebSocketServer(app, sessionMiddleware, hooks = {}) {
     const server = http.createServer(app);
     const io = new Server(server, {
         cors: {
-            origin: true,
+            origin: ['http://127.0.0.1', 'http://localhost', 'http://127.0.0.1:80', 'http://127.0.0.1:8080'],
             credentials: true,
             methods: ['GET', 'POST']
         },

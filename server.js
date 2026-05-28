@@ -1,12 +1,16 @@
+require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const helmet = require('helmet');
+const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const v8 = require('v8');
-const { initDatabase, database } = require('./database-mysql');
+const { initDatabase, database, DB_CONFIG } = require('./database-mysql');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
+const MySQLSessionStore = require('express-mysql-session')(session);
 const { createWebSocketServer, getSessionCount, broadcastToClass, kickUserSessions, kickSocketsForSession, CLASS_MAX_SESSIONS, TEACHER_MAX_SESSIONS } = require('./ws-server');
 const workerPool = require('./worker-pool');
 const http = require('http');
@@ -41,7 +45,6 @@ function safeSendBuffer(req, res, buffer, filename) {
         // 设置正确的响应头
         res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(filename));
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Transfer-Encoding', 'chunked');
         
         let sent = false;
         
@@ -278,6 +281,19 @@ app.use((req, res, next) => {
 });
 
 // 中间件
+app.disable('x-powered-by');
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    crossOriginResourcePolicy: { policy: 'same-origin' }
+}));
+app.use(cors({
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: 86400000 }));
@@ -428,7 +444,7 @@ function clearAccountFailed(employee_id) {
 const ipAttempts = new Map(); // ip -> { totalFails, captchaFails, cooldownUntil, locked, lockTime, reason }
 const CAPTCHA_FAIL_COOLDOWN_THRESHOLD = 5; // 5次失败后进入冷却（单轮）
 const CAPTCHA_FAIL_LOCK_THRESHOLD = 10; // 累计10次失败后锁定IP
-const COOLDOWN_TIME_MS = 10 * 1000; // 10秒冷却
+const COOLDOWN_TIME_MS = 10 * 60 * 1000; // 10分钟冷却
 
 function getClientIP(req) {
     return req.ip || 
@@ -522,12 +538,26 @@ app.use('/api', (req, res, next) => {
 });
 
 // Session 中间件（必须在路由前面）
+const sessionStore = new MySQLSessionStore({
+    host: DB_CONFIG.host,
+    port: DB_CONFIG.port,
+    user: DB_CONFIG.user,
+    password: DB_CONFIG.password,
+    database: DB_CONFIG.database,
+    createDatabaseTable: true,
+    clearExpired: true,
+    checkExpirationInterval: 900000,
+    expiration: 86400000 * 7
+});
 const sessionMiddleware = session({
-    secret: 'score-analysis-secret-key',
+    secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
     resave: false,
     saveUninitialized: false,
+    store: sessionStore,
     cookie: {
-        maxAge: null // 默认关闭浏览器即失效，登录时根据"记住我"动态设置
+        maxAge: null,
+        httpOnly: true,
+        sameSite: 'lax'
     }
 });
 app.use(sessionMiddleware);
@@ -4089,7 +4119,12 @@ app.get('/api/ai/context', requireAuth, async (req, res) => {
         console.log(`[AI] 📋 获取上下文 → 账号: ${user.name}(${user.employee_id}), 角色: ${role}, 页面: ${page}`);
 
         if (role === 'teacher') {
-            contextText = await buildTeacherContext(user, page, selection);
+            if (page === '/homework-data') {
+                console.log('[AI] 📝 使用作业数据专门上下文');
+                contextText = await buildHomeworkDataContext(user, selection);
+            } else {
+                contextText = await buildTeacherContext(user, page, selection);
+            }
         } else if (role === 'student') {
             contextText = await buildStudentContext(user, page, selection);
         }
@@ -4139,6 +4174,8 @@ async function buildTeacherContext(user, page, selection) {
     lines.push(...(await buildCompactBeautyLines(classId, selection, pageLabel)));
     lines.push('=== 班级考试成绩数据 ===');
     lines.push(...(await buildCompactExamLines(classId)));
+    lines.push('=== 班级作业未提交数据 ===');
+    lines.push(...(await buildCompactHomeworkLines(classId, selection)));
 
     lines.push('');
     lines.push('【智能路由规则】');
@@ -4152,12 +4189,18 @@ async function buildTeacherContext(user, page, selection) {
         lines.push(`- 默认分析【当前页面】(${pageLabel})的数据`);
         lines.push('- 用户说"成绩/考试/排名/平均分/科目/总分"→用【考试成绩数据】回答');
         lines.push('- 用户说"美丽学分/学分/积分/事件/扣分/加分"→用【美丽学分数据】回答');
+        lines.push('- 用户说"作业/提交/缺交/未交/补交"→用【作业未提交数据】回答，禁止输出美丽学分');
+        lines.push('- 回答作业问题时：只输出未提交统计，不要建议联系班主任、德育组等');
+        lines.push('- 回答美丽学分问题时：只输出班级名单中的数据，学生在则展示积分，不在则告知"班级名单中无此人，请核对姓名或学号"。不要建议联系班主任、德育组等');
     }
     lines.push('- 用户说"再次分析/重新分析"→请基于以上当前数据重新分析，不要沿用对话历史中的旧数据');
     lines.push('- 用户说"作业/提交/缺交"→用作业数据回答');
     lines.push('【回复要求】简洁精炼，只输出核心结论与可行建议，控制篇幅不啰嗦。');
 
-    return lines.join('\n');
+    const contextText = lines.join('\n');
+    console.log('[DEBUG buildTeacherContext] 返回上下文长度:', contextText.length);
+    console.log('[DEBUG buildTeacherContext] 前2500字符预览:', contextText.substring(0, 2500));
+    return contextText;
 }
 
 function pageToLabel(page) {
@@ -4236,6 +4279,61 @@ async function buildCompactBeautyLines(classId, selection, pageLabel) {
             lines.push(`${name}(${sid}) ${t}`);
         });
     }
+    return lines;
+}
+
+async function buildCompactHomeworkLines(classId, selection) {
+    const lines = [];
+    const semester = selection.semester || '';
+    const subject = selection.subject || '';
+
+    let query = 'SELECT hd.*, s.name as student_name, s.student_id FROM homework_data hd JOIN students s ON hd.student_id = s.id WHERE s.class_id = ?';
+    const params = [classId];
+
+    if (semester) {
+        query += ' AND hd.semester = ?';
+        params.push(semester);
+    }
+    if (subject) {
+        query += ' AND hd.subject = ?';
+        params.push(subject);
+    }
+
+    console.log('[DEBUG buildCompactHomeworkLines] SQL:', query);
+    console.log('[DEBUG buildCompactHomeworkLines] params:', params);
+    const allData = await database.all(query + ' ORDER BY hd.date DESC', params);
+    console.log('[DEBUG buildCompactHomeworkLines] 结果条数:', allData ? allData.length : 'null');
+
+    if (!allData.length) {
+        lines.push('暂无作业数据');
+        return lines;
+    }
+
+    const unsubmitted = allData.filter(d => d.submitted === 0);
+    const total = allData.length;
+    const submittedCount = total - unsubmitted.length;
+    const rate = total > 0 ? ((submittedCount / total) * 100).toFixed(1) : '0';
+
+    lines.push(`总体：${total}条记录，已提交${submittedCount}条，未提交${unsubmitted.length}条，提交率${rate}%`);
+
+    if (unsubmitted.length > 0) {
+        const byStudent = {};
+        unsubmitted.forEach(d => {
+            const key = d.student_name || d.student_id;
+            if (!byStudent[key]) byStudent[key] = { count: 0, student_id: d.student_id, subjects: {} };
+            byStudent[key].count++;
+            byStudent[key].subjects[d.subject] = (byStudent[key].subjects[d.subject] || 0) + 1;
+        });
+
+        const sorted = Object.entries(byStudent).sort((a, b) => b[1].count - a[1].count);
+        lines.push('');
+        lines.push('【未提交作业学生统计】');
+        sorted.forEach(([name, info]) => {
+            const subjectStr = Object.entries(info.subjects).map(([s, c]) => `${s}×${c}`).join(', ');
+            lines.push(`${name}(${info.student_id})：缺交${info.count}次 [${subjectStr}]`);
+        });
+    }
+
     return lines;
 }
 
@@ -5161,105 +5259,8 @@ async function buildTotalTableContext(user, selection) {
 }
 
 async function buildHomeworkDataContext(user, selection) {
-    const lines = [];
-    lines.push('【当前用户信息】');
-    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
-    lines.push('');
-
-    const semester = selection.semester;
-    const classId = selection.class_id;
-    const subject = selection.subject;
-    const date = selection.date;
-
-    if (!classId) {
-        return buildDefaultTeacherContext(user);
-    }
-
-    const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
-
-    if (!classInfo) {
-        return buildDefaultTeacherContext(user);
-    }
-
-    lines.push(`【当前页面】作业数据`);
-    lines.push(`【当前班级】${classInfo.name}`);
-    if (semester) lines.push(`【当前学期】${semester}`);
-    if (subject) lines.push(`【当前学科】${subject}`);
-    if (date) lines.push(`【当前日期】${date}`);
-    lines.push('');
-
-    let homeworkQuery = 'SELECT hd.*, s.name as student_name, s.student_id FROM homework_data hd JOIN students s ON hd.student_id = s.id WHERE s.class_id = ?';
-    let params = [classId];
-
-    if (semester) {
-        homeworkQuery += ' AND hd.semester = ?';
-        params.push(semester);
-    }
-    if (subject) {
-        homeworkQuery += ' AND hd.subject = ?';
-        params.push(subject);
-    }
-    if (date) {
-        homeworkQuery += ' AND hd.date = ?';
-        params.push(date);
-    }
-
-    const homeworkData = await database.all(homeworkQuery + ' ORDER BY hd.date DESC', params);
-
-    if (homeworkData.length > 0) {
-        const totalCount = homeworkData.length;
-        const submittedCount = homeworkData.filter(d => d.submitted).length;
-        const lateCount = homeworkData.filter(d => d.late).length;
-        const unsubmittedCount = totalCount - submittedCount;
-        const submissionRate = totalCount > 0 ? ((submittedCount / totalCount) * 100).toFixed(1) : 0;
-
-        lines.push(`【作业提交统计】`);
-        lines.push(`总记录数：${totalCount}条`);
-        lines.push(`已提交：${submittedCount}次`);
-        lines.push(`补交：${lateCount}次`);
-        lines.push(`未提交：${unsubmittedCount}次`);
-        lines.push(`提交率：${submissionRate}%`);
-        lines.push('');
-
-        const studentStats = {};
-        homeworkData.forEach(d => {
-            if (!studentStats[d.student_id]) {
-                studentStats[d.student_id] = {
-                    name: d.student_name,
-                    student_id: d.student_id,
-                    total_count: 0,
-                    submitted_count: 0,
-                    late_count: 0,
-                    unsubmitted_count: 0
-                };
-            }
-            studentStats[d.student_id].total_count++;
-            if (d.submitted) {
-                studentStats[d.student_id].submitted_count++;
-            } else {
-                studentStats[d.student_id].unsubmitted_count++;
-            }
-            if (d.late) {
-                studentStats[d.student_id].late_count++;
-            }
-        });
-
-        const sortedByUnsubmitted = Object.values(studentStats).sort((a, b) => b.unsubmitted_count - a.unsubmitted_count);
-        const needAttention = sortedByUnsubmitted.filter(s => s.unsubmitted_count > 0).slice(0, 5);
-
-        if (needAttention.length > 0) {
-            lines.push(`【需要关注学生前5名】`);
-            needAttention.forEach((s, i) => {
-                lines.push(`第${i + 1}名：${s.name}(${s.student_id})，未提交${s.unsubmitted_count}次，补交${s.late_count}次，提交率${((s.submitted_count / s.total_count) * 100).toFixed(1)}%`);
-            });
-            lines.push('');
-        }
-    } else {
-        lines.push('【作业提交统计】暂无作业数据记录');
-        lines.push('');
-    }
-
-    return lines.join('\n');
+    return `【系统要求】
+无论用户问什么，你只回复这一句话：功能正在开发，敬请期待`;
 }
 
 async function buildDefaultTeacherContext(user) {
@@ -5873,7 +5874,7 @@ async function buildStudentContext(user, page, selection) {
 }
 
 // ===== Qwen AI 代理端点 (使用阿里云 DashScope API) =====
-app.post('/api/ollama/chat', async (req, res) => {
+app.post('/api/ollama/chat', requireAuth, async (req, res) => {
     try {
         const { model, messages, stream } = req.body;
         const apiKey = 'sk-79d6dec0d9704699be000aa0d14d5b55';
@@ -6127,7 +6128,7 @@ async function startServer() {
         console.log('[BACKUP] 收到备份请求');
         try {
             const { getPool, DB_CONFIG: bakDB_CONFIG } = require('./database-mysql');
-            const DB_CONFIG = bakDB_CONFIG || { host: 'localhost', port: 3306, user: 'root', password: '123456', database: 'score_analysis' };
+            const DB_CONFIG = bakDB_CONFIG || { host: 'localhost', port: 3306 };
             const pool = getPool();
             
             console.log('[BACKUP] DB_CONFIG:', { host: DB_CONFIG.host, port: DB_CONFIG.port, database: DB_CONFIG.database });
@@ -6235,7 +6236,7 @@ async function startServer() {
             }
 
             const { getPool, DB_CONFIG: restDB_CONFIG } = require('./database-mysql');
-            const DB_CONFIG = restDB_CONFIG || { host: 'localhost', port: 3306, user: 'root', password: '123456' };
+            const DB_CONFIG = restDB_CONFIG || { host: 'localhost', port: 3306 };
 
             const sqlContent = fs.readFileSync(backupFile, 'utf8');
             const pool = getPool();
@@ -6487,7 +6488,6 @@ async function startServer() {
         console.log('  会话空闲超时: ' + SESSION_IDLE_MS / 60000 + ' 分钟无操作需重新登录');
         console.log('  内存限制: ' + (v8.getHeapStatistics().heap_size_limit / 1048576).toFixed(0) + 'MB');
         console.log('=========================================');
-        console.log('默认管理员: admin / admin123');
         console.log('[安全] 3001端口已限制，仅允许通过反向代理访问');
         
         // 每10分钟打印一次内存使用情况
@@ -6527,7 +6527,7 @@ async function startServer() {
                 console.log('[备份] 开始自动备份...');
                 try {
                     const { getPool, DB_CONFIG: bakDB_CONFIG } = require('./database-mysql');
-                    const DB_CONFIG = bakDB_CONFIG || { host: 'localhost', port: 3306, user: 'root', password: '123456', database: 'score_analysis' };
+                    const DB_CONFIG = bakDB_CONFIG || { host: 'localhost', port: 3306 };
                     const pool = getPool();
                     const BACKUP_DIR = path.join(__dirname, 'database');
                     if (!fs.existsSync(BACKUP_DIR)) {

@@ -4,19 +4,22 @@
   "description": "成绩分析管理系统",
   "main": "server.js",
   "scripts": {
-    "start": "node --max-old-space-size=2048 server.js",
-    "dev": "node --max-old-space-size=2048 server.js",
-    "monitor": "node --max-old-space-size=512 monitor-server.js",
-    "proxy": "node proxy.js"
+    "start": "node --max-old-space-size=12288 server.js",
+    "dev": "node --max-old-space-size=12288 server.js",
+    "monitor": "node --max-old-space-size=2048 monitor-server.js",
+    "proxy": "node --max-old-space-size=256 proxy.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",
     "deasync": "^0.1.31",
+    "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "express": "^4.18.2",
+    "express-mysql-session": "^3.0.3",
     "express-session": "^1.17.3",
+    "helmet": "^7.1.0",
     "http-proxy": "^1.18.1",
     "lib0": "^0.2.117",
     "multer": "^2.1.1",

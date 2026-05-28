@@ -1,11 +1,13 @@
 // 限制 libuv 线程池大小为 1，减少 CPU 占用
 process.env.UV_THREADPOOL_SIZE = '1';
 
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const si = require('systeminformation');
 const mysql = require('mysql2/promise');
+const helmet = require('helmet');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -16,12 +18,23 @@ const MAIN_SERVER_URL = 'http://127.0.0.1:3001';
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: true, credentials: true },
+    cors: {
+        origin: ['http://127.0.0.1', 'http://localhost', 'http://127.0.0.1:80', 'http://127.0.0.1:8080'],
+        credentials: true,
+        methods: ['GET', 'POST']
+    },
     pingInterval: 5000,
     pingTimeout: 3000,
     connectTimeout: 5000
 });
 
+app.disable('x-powered-by');
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    crossOriginResourcePolicy: { policy: 'same-origin' }
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'monitor-public')));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -64,23 +77,12 @@ function getLocalIP() {
 }
 const LOCAL_IP = getLocalIP();
 
-// 从主服务器读取数据库配置
+// 从主服务器读取数据库配置（与 server.js 共用同一个数据库配置）
+const { DB_CONFIG } = require('./database-mysql');
 const mainDbConfig = {
-    host: 'localhost',
-    port: 3306,
+    host: DB_CONFIG.host,
+    port: DB_CONFIG.port,
     connected: false
-};
-
-// monitor 自己的数据库配置（用于登录）
-const DB_CONFIG = {
-    host: 'localhost',
-    port: 3306,
-    user: 'root',
-    password: '123456',
-    database: 'score_analysis',
-    waitForConnections: true,
-    connectionLimit: 5,
-    queueLimit: 0
 };
 
 function discoverLogFiles() {
@@ -329,13 +331,6 @@ function startPsMonitor() {
     }
 }
 
-function verifyLoginCredentials(username, password) {
-    if ((username === 'admin' && password === 'admin123') || (username === 'root' && password === 'root')) {
-        return { ok: true, name: username };
-    }
-    return { ok: false };
-}
-
 app.post('/api/login', async (req, res) => {
     const ip = normalizeIP(getClientIP(req));
     
@@ -360,7 +355,7 @@ app.post('/api/login', async (req, res) => {
             if (rows.length > 0) {
                 const user = rows[0];
                 const bcrypt = require('bcryptjs');
-                if (bcrypt.compareSync(password, user.password) || password === user.plain_password) {
+                if (bcrypt.compareSync(password, user.password)) {
                     credOk = true;
                     userName = user.name;
                 }
@@ -370,15 +365,7 @@ app.post('/api/login', async (req, res) => {
         }
     }
     if (!credOk) {
-        const fb = verifyLoginCredentials(username, password);
-        if (fb.ok) {
-            credOk = true;
-            userName = fb.name;
-        }
-    }
-
-    if (!credOk) {
-        addLog(`登录失败（密码错误）: ${username}`, 'warning');
+        addLog(`登录失败(数据库未连接或密码错误): ${username}`, 'warning');
         recordMonitorFailure(ip, 'login');
         return res.status(401).json({ success: false, message: '用户名或密码错误' });
     }
@@ -701,32 +688,6 @@ app.post('/api/kick-monitor-device', (req, res) => {
     res.json({ success: true, message: '已踢出设备' });
 });
 
-// 获取所有被锁定的IP
-app.get('/api/locked-ips', (req, res) => {
-    const locked = [];
-    for (const [ip, record] of monitorLockedIPs.entries()) {
-        if (record.lastResetDate === getTodayDateKey()) {
-            locked.push({ ip, failures: record.failures, rejects: record.rejects });
-        }
-    }
-    res.json({ success: true, lockedIPs: locked });
-});
-
-// 手动解锁指定IP
-app.post('/api/unlock-ip', (req, res) => {
-    const localIp = normalizeIP(getClientIP(req));
-    if (!isLocalIP(localIp)) {
-        return res.status(403).json({ success: false, message: '仅本地访问' });
-    }
-    const { ip } = req.body;
-    if (!ip) {
-        return res.status(400).json({ success: false, message: '缺少 IP' });
-    }
-    monitorLockedIPs.delete(ip);
-    addLog(`已手动解锁 IP: ${ip}`, 'info');
-    res.json({ success: true, message: '已解锁' });
-});
-
 app.get('/api/logs', (req, res) => {
     res.json({ logs: [...serverLogs] });
 });
@@ -750,34 +711,85 @@ app.get('/api/locked-ips', async (req, res) => {
             req2.on('error', reject);
             req2.on('timeout', () => { req2.destroy(); reject(new Error('timeout')); });
         });
-        res.json(result);
+        // 合并主服务器的IP + monitor自己的IP
+        const mainLocked = result.data || [];
+        const monitorLocked = [];
+        for (const [ip, record] of monitorLockedIPs.entries()) {
+            if (record.lastResetDate === getTodayDateKey() && record.locked) {
+                monitorLocked.push({
+                    ip: ip,
+                    lockTime: Date.now(),
+                    reason: 'monitor登录失败次数过多',
+                    captchaFails: record.failures
+                });
+            }
+        }
+        const allLocked = [...mainLocked, ...monitorLocked];
+        res.json({ success: true, data: allLocked });
     } catch (err) {
-        res.json({ success: false, data: [] });
+        // 出错时至少返回monitor自己的IP
+        const monitorLocked = [];
+        for (const [ip, record] of monitorLockedIPs.entries()) {
+            if (record.lastResetDate === getTodayDateKey() && record.locked) {
+                monitorLocked.push({
+                    ip: ip,
+                    lockTime: Date.now(),
+                    reason: 'monitor登录失败次数过多',
+                    captchaFails: record.failures
+                });
+            }
+        }
+        res.json({ success: true, data: monitorLocked });
     }
 });
 
-app.post('/api/unlock-ip', (req, res) => {
+app.post('/api/unlock-ip', async (req, res) => {
+    const localIp = normalizeIP(getClientIP(req));
+    if (!isLocalIP(localIp)) {
+        return res.status(403).json({ success: false, message: '仅本地访问' });
+    }
+    
     const { ip } = req.body;
-    const postData = JSON.stringify({ ip });
-    const options = {
-        hostname: '127.0.0.1',
-        port: 3001,
-        path: '/api/monitor/unlock-ip',
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-        timeout: 3000
-    };
-    const req2 = require('http').request(options, (resp) => {
-        let data = '';
-        resp.on('data', chunk => data += chunk);
-        resp.on('end', () => {
-            try { res.json(JSON.parse(data)); } catch (e) { res.json({ success: false }); }
+    if (!ip) {
+        return res.status(400).json({ success: false, message: '缺少 IP' });
+    }
+
+    // 先解锁 monitor 自己的 IP
+    if (monitorLockedIPs.has(ip)) {
+        monitorLockedIPs.delete(ip);
+        addLog(`已解锁 monitor IP: ${ip}`, 'info');
+    }
+
+    // 再尝试解锁主服务器的 IP
+    try {
+        const postData = JSON.stringify({ ip });
+        const options = {
+            hostname: '127.0.0.1',
+            port: 3001,
+            path: '/api/monitor/unlock-ip',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+            timeout: 3000
+        };
+        const req2 = require('http').request(options, (resp) => {
+            let data = '';
+            resp.on('data', chunk => data += chunk);
+            resp.on('end', () => {
+                try {
+                    const respData = JSON.parse(data);
+                    res.json({ ...respData, message: '已解锁 IP' });
+                } catch (e) {
+                    res.json({ success: true, message: '已解锁 IP' });
+                }
+            });
         });
-    });
-    req2.on('error', () => res.status(502).json({ success: false, message: '代理请求失败' }));
-    req2.on('timeout', () => { req2.destroy(); res.status(504).json({ success: false, message: '代理请求超时' }); });
-    req2.write(postData);
-    req2.end();
+        req2.on('error', () => res.json({ success: true, message: '已解锁 IP' }));
+        req2.on('timeout', () => { req2.destroy(); res.json({ success: true, message: '已解锁 IP' }); });
+        req2.write(postData);
+        req2.end();
+    } catch (err) {
+        res.json({ success: true, message: '已解锁 IP' });
+    }
 });
 
 // 主服务器状态
@@ -1293,7 +1305,7 @@ function spawnMainServer() {
     mainServerDbConnected = false;
     let startedLogged = false;
 
-    mainServerProcess = spawn('node', [serverScript], {
+    mainServerProcess = spawn('node', ['--max-old-space-size=12288', serverScript], {
         cwd: __dirname,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env }
