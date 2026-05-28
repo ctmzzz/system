@@ -125,6 +125,76 @@ let workerPoolStats = null;
 const onlineMonitorSessions = new Map(); // socketId → { ip, connectedAt, userAgent }
 const kickedIPs = new Set();
 
+// ===== Monitor 登录锁定：密码错误3次 或 申请被拒3次（每日24点自动清除） =====
+const monitorLockedIPs = new Map();
+const MONITOR_MAX_FAILURES = 3;
+const MONITOR_MAX_REJECTS = 3;
+
+function getTodayDateKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function isIPLocked(ip) {
+    const record = monitorLockedIPs.get(ip);
+    if (!record) return false;
+    const today = getTodayDateKey();
+    if (record.lastResetDate !== today) {
+        monitorLockedIPs.delete(ip);
+        return false;
+    }
+    return record.locked === true;
+}
+
+function recordMonitorFailure(ip, type) {
+    const today = getTodayDateKey();
+    let record = monitorLockedIPs.get(ip);
+    if (!record || record.lastResetDate !== today) {
+        record = { failures: 0, rejects: 0, locked: false, lastResetDate: today };
+    }
+    if (type === 'login') {
+        record.failures++;
+        if (record.failures >= MONITOR_MAX_FAILURES) {
+            record.locked = true;
+            const warnMsg = `[警告] IP ${ip} 连续密码错误 ${record.failures} 次，已被锁定禁止登录 monitor`;
+            addLog(warnMsg, 'warning');
+            console.error(warnMsg);
+            monitorLockedIPs.set(ip, record);
+            return true;
+        }
+    } else if (type === 'reject') {
+        record.rejects++;
+        if (record.rejects >= MONITOR_MAX_REJECTS) {
+            record.locked = true;
+            const warnMsg = `[警告] IP ${ip} 申请连续被拒绝 ${record.rejects} 次，已被锁定禁止登录 monitor`;
+            addLog(warnMsg, 'warning');
+            console.error(warnMsg);
+            monitorLockedIPs.set(ip, record);
+            return true;
+        }
+    }
+    monitorLockedIPs.set(ip, record);
+    return false;
+}
+
+function clearMidnightLockedIPs() {
+    const today = getTodayDateKey();
+    let clearedCount = 0;
+    for (const [ip, record] of monitorLockedIPs.entries()) {
+        if (record.lastResetDate !== today) {
+            monitorLockedIPs.delete(ip);
+            clearedCount++;
+        }
+    }
+    if (clearedCount > 0) {
+        const infoMsg = `[系统] 每日重置：已清除 ${clearedCount} 个锁定IP`;
+        addLog(infoMsg, 'info');
+    }
+}
+
+// 每60秒检查一次是否需要跨日重置
+setInterval(clearMidnightLockedIPs, 60000);
+
 let lastCpuUsage = process.cpuUsage();
 let lastCpuTime = Date.now();
 
@@ -269,6 +339,11 @@ function verifyLoginCredentials(username, password) {
 app.post('/api/login', async (req, res) => {
     const ip = normalizeIP(getClientIP(req));
     
+    if (isIPLocked(ip)) {
+        addLog(`IP ${ip} 已被锁定，拒绝登录 monitor`, 'warning');
+        return res.status(423).json({ success: false, message: '该设备已被禁止登录，请明天再试', locked: true });
+    }
+    
     const { username, password } = req.body;
     if (!username || !password) {
         return res.status(400).json({ success: false, message: '请输入用户名和密码' });
@@ -304,7 +379,18 @@ app.post('/api/login', async (req, res) => {
 
     if (!credOk) {
         addLog(`登录失败（密码错误）: ${username}`, 'warning');
+        recordMonitorFailure(ip, 'login');
         return res.status(401).json({ success: false, message: '用户名或密码错误' });
+    }
+
+    // 登录成功，清除该IP的失败记录
+    if (monitorLockedIPs.has(ip)) {
+        const record = monitorLockedIPs.get(ip);
+        if (record.failures > 0 || record.locked) {
+            record.failures = 0;
+            record.locked = false;
+            addLog(`IP ${ip} 密码错误记录已清除（登录成功）`, 'info');
+        }
     }
 
     if (!isLocalIP(ip) && !certifiedDevices.has(ip)) {
@@ -321,9 +407,12 @@ app.post('/api/login', async (req, res) => {
     res.json({ success: true, user: { name: userName, username } });
 });
 
-// 检查IP类型（本地/局域网/认证设备/需要审批）
+// 检查IP类型（本地/局域网/认证设备/需要审批/已锁定）
 app.get('/api/check-ip', (req, res) => {
     const ip = normalizeIP(getClientIP(req));
+    if (isIPLocked(ip)) {
+        return res.json({ type: 'locked', ip, message: '该设备已被锁定，禁止访问' });
+    }
     if (isLocalIP(ip)) {
         return res.json({ type: 'local', ip, message: '本地访问' });
     }
@@ -390,6 +479,10 @@ setInterval(() => {
 app.post('/api/request-access', (req, res) => {
     const ip = normalizeIP(getClientIP(req));
     const { userAgent, username } = req.body;
+    
+    if (isIPLocked(ip)) {
+        return res.status(423).json({ success: false, message: '该设备已被锁定，请明天再试', locked: true });
+    }
     
     // 被踢出的设备重新申请时清除踢出标记
     if (kickedIPs.has(ip)) {
@@ -485,6 +578,7 @@ app.post('/api/reject-access', (req, res) => {
     savePendingFile();
     
     addLog(`访问请求已拒绝: ${request.ip}`, 'warning');
+    recordMonitorFailure(request.ip, 'reject');
     io.emit('access_request_rejected', { requestId, ip: request.ip });
     res.json({ success: true, message: '已拒绝' });
 });
@@ -605,6 +699,32 @@ app.post('/api/kick-monitor-device', (req, res) => {
     
     io.emit('monitor_online_devices_updated', [...onlineMonitorSessions.values()]);
     res.json({ success: true, message: '已踢出设备' });
+});
+
+// 获取所有被锁定的IP
+app.get('/api/locked-ips', (req, res) => {
+    const locked = [];
+    for (const [ip, record] of monitorLockedIPs.entries()) {
+        if (record.lastResetDate === getTodayDateKey()) {
+            locked.push({ ip, failures: record.failures, rejects: record.rejects });
+        }
+    }
+    res.json({ success: true, lockedIPs: locked });
+});
+
+// 手动解锁指定IP
+app.post('/api/unlock-ip', (req, res) => {
+    const localIp = normalizeIP(getClientIP(req));
+    if (!isLocalIP(localIp)) {
+        return res.status(403).json({ success: false, message: '仅本地访问' });
+    }
+    const { ip } = req.body;
+    if (!ip) {
+        return res.status(400).json({ success: false, message: '缺少 IP' });
+    }
+    monitorLockedIPs.delete(ip);
+    addLog(`已手动解锁 IP: ${ip}`, 'info');
+    res.json({ success: true, message: '已解锁' });
 });
 
 app.get('/api/logs', (req, res) => {
@@ -1314,6 +1434,12 @@ function startWorkerPoolMonitor() {
 
 io.on('connection', (socket) => {
     const ip = normalizeIP(socket.handshake.address);
+    
+    if (isIPLocked(ip)) {
+        socket.emit('locked', { message: '该设备已被锁定，请明天再试' });
+        socket.disconnect(true);
+        return;
+    }
     
     // 检查是否被踢出
     if (kickedIPs.has(ip)) {

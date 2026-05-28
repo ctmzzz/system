@@ -81,6 +81,14 @@ async function checkAccess() {
         const data = await res.json();
         currentAccessType = data.type;
         const hint = document.getElementById('loginHint');
+        if (data.type === 'locked') {
+            hint.textContent = '该设备已被锁定，禁止访问';
+            hint.style.color = 'var(--error)';
+            document.getElementById('loginPage').style.display = 'flex';
+            document.getElementById('monitorPage').style.display = 'none';
+            document.getElementById('loginFormArea').innerHTML = '<div style="color:var(--error);text-align:center;padding:20px;font-size:14px;">该设备已被锁定，请明天再试</div>';
+            return;
+        }
         if (data.type === 'local') {
             hint.textContent = '服务器本机';
         } else if (data.type === 'certified') {
@@ -208,6 +216,14 @@ function showRequestPopup(username, password) {
             userAgent: navigator.userAgent.substring(0, 100)
         })
     }).then(res => res.json()).then(data => {
+        if (data.locked) {
+            clearInterval(countdownTimer);
+            clearInterval(checkInterval);
+            popup.style.display = 'none';
+            document.getElementById('loginError').textContent = '该设备已被锁定，请明天再试';
+            setTimeout(() => document.getElementById('loginError').textContent = '', 5000);
+            return;
+        }
         if (data.success) {
             if (data.status === 'certified') {
                 clearInterval(countdownTimer);
@@ -304,6 +320,13 @@ function initLogin() {
                     body: JSON.stringify({ username, password })
                 });
                 const data = await res.json();
+                if (data.locked) {
+                    errEl.textContent = '该设备已被锁定，请明天再试';
+                    setTimeout(() => errEl.textContent = '', 5000);
+                    txt.style.display = 'block';
+                    loader.style.display = 'none';
+                    return;
+                }
                 if (data.success) {
                     showMonitor();
                 } else {
@@ -327,6 +350,13 @@ function initLogin() {
                     body: JSON.stringify({ username, password })
                 });
                 const data = await res.json();
+                if (data.locked) {
+                    errEl.textContent = '该设备已被锁定，请明天再试';
+                    setTimeout(() => errEl.textContent = '', 5000);
+                    txt.style.display = 'block';
+                    loader.style.display = 'none';
+                    return;
+                }
                 if (data.cred_ok) {
                     txt.style.display = 'block';
                     loader.style.display = 'none';
