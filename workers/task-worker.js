@@ -352,7 +352,7 @@ async function exportBeautyScores({ classId, startMonth, endMonth, studentIds, i
 
             // 学生列
             students.forEach((s, si) => {
-                const key = s.student_id + '_' + (i + 1);
+                const key = s.student_id + '_' + i;
                 const data = allData[month][key];
                 const val = data ? (parseFloat(data.score) || 0) : 0;
                 const cell = r.getCell(FIXED_COLS + 1 + si);
@@ -418,7 +418,7 @@ async function exportBeautyScores({ classId, startMonth, endMonth, studentIds, i
         students.forEach((s, si) => {
             let total = 0;
             for (let i = 0; i < tree.length; i++) {
-                const key = s.student_id + '_' + (i + 1);
+                const key = s.student_id + '_' + i;
                 const data = allData[month][key];
                 if (data) total += parseFloat(data.score) || 0;
             }

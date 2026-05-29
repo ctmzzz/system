@@ -9,26 +9,43 @@ const DB_CONFIG = {
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'score_analysis',
     waitForConnections: true,
-    connectionLimit: 50,
-    queueLimit: 100,
+    connectionLimit: 20,
+    queueLimit: 0,
     decimalNumbers: true,
-    acquireTimeout: 60000,
-    timeout: 60000,
-    reconnect: true,
+    connectTimeout: 5000,
+    acquireTimeout: 10000,
+    timeout: 30000,
     enableKeepAlive: true,
-    keepAliveInitialDelay: 0
+    keepAliveInitialDelay: 10000
 };
 
 let pool = null;
 
+const sqlCache = new Map();
+const SQL_CACHE_MAX_SIZE = 500;
+
+const NEEDS_NORMALIZE = /\bCAST\b|\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b|last_insert_rowid|(?<!\w)as\s+rank\b/i;
+
 function normalizeSQL(sql) {
-    return sql
+    const cached = sqlCache.get(sql);
+    if (cached !== undefined) return cached;
+
+    if (!NEEDS_NORMALIZE.test(sql)) {
+        if (sqlCache.size >= SQL_CACHE_MAX_SIZE) sqlCache.clear();
+        sqlCache.set(sql, sql);
+        return sql;
+    }
+
+    const normalized = sql
         .replace(/CAST\s*\(\s*(\S[^)]*?)\s+AS\s+INTEGER\s*\)/gi, 'CAST($1 AS SIGNED)')
         .replace(/CAST\s*\(\s*(\S[^)]*?)\s+AS\s+REAL\s*\)/gi, 'CAST($1 AS DECIMAL(10,2))')
         .replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'INT AUTO_INCREMENT PRIMARY KEY')
         .replace(/last_insert_rowid\(\)/gi, 'LAST_INSERT_ID()')
-        // 给作为别名的 rank 加反引号（MySQL 保留字）
         .replace(/\bas\s+rank\b/gi, 'as `rank`');
+
+    if (sqlCache.size >= SQL_CACHE_MAX_SIZE) sqlCache.clear();
+    sqlCache.set(sql, normalized);
+    return normalized;
 }
 
 async function initDatabase() {

@@ -3,6 +3,7 @@ const express = require('express');
 const session = require('express-session');
 const helmet = require('helmet');
 const cors = require('cors');
+const compression = require('compression');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -13,6 +14,8 @@ const multer = require('multer');
 const MySQLSessionStore = require('express-mysql-session')(session);
 const { createWebSocketServer, getSessionCount, broadcastToClass, kickUserSessions, kickSocketsForSession, CLASS_MAX_SESSIONS, TEACHER_MAX_SESSIONS } = require('./ws-server');
 const workerPool = require('./worker-pool');
+const rateLimit = require('express-rate-limit');
+const xssFilters = require('xss');
 const http = require('http');
 
 // ===== 全局错误处理：防止EPIPE等错误导致进程崩溃 =====
@@ -142,7 +145,23 @@ const INDICATOR_TREE = [
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// 获取本机IP地址
+// 获取本机所有IP地址（内网+外网）用于 CORS 白名单
+function getAllLocalIPs() {
+    const os = require('os');
+    const ips = new Set(['127.0.0.1', 'localhost']);
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' || iface.family === 'IPv6') {
+                ips.add(iface.address);
+            }
+        }
+    }
+    return ips;
+}
+const ALL_LOCAL_IPS = getAllLocalIPs();
+
+// 获取首选IPv4地址（用于显示）
 function getLocalIP() {
     const os = require('os');
     const interfaces = os.networkInterfaces();
@@ -176,6 +195,29 @@ function logEvent(msg, req, extra = '', level = 'info') {
     } else {
         console.log(logMsg);
     }
+}
+
+// ===== 统一安全告警函数：所有攻击检测触发时立即输出严重警告 =====
+function securityAlert(attackType, details, ipOrReq) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const time = now.getFullYear() + '-' +
+        pad(now.getMonth() + 1) + '-' +
+        pad(now.getDate()) + ' ' +
+        pad(now.getHours()) + ':' +
+        pad(now.getMinutes()) + ':' +
+        pad(now.getSeconds());
+    let ip, path;
+    if (typeof ipOrReq === 'object' && ipOrReq !== null) {
+        ip = ipOrReq.ip || ipOrReq.connection?.remoteAddress || '?';
+        path = ipOrReq.path || '';
+    } else {
+        ip = ipOrReq || '?';
+        path = '';
+    }
+    const pathInfo = path ? ` → ${path}` : '';
+    const alertMsg = `[安全告警] [${attackType}] [${time}] [IP:${ip}${pathInfo}] ${details}`;
+    console.error(alertMsg);
 }
 
 // ===== 会话空闲超时：超过此时长无操作须重新登录（关闭浏览器后仅 cookie 仍存活时，下次请求也会被判超时） =====
@@ -249,19 +291,6 @@ if (!fs.existsSync(IMAGE_DIR)) {
     console.log('已创建图片存储目录:', IMAGE_DIR);
 }
 
-// multer 配置
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, IMAGE_DIR),
-    filename: (req, file, cb) => {
-        const uniqueName = Date.now() + '-' + Math.random().toString(36).substring(2, 8) + path.extname(file.originalname);
-        cb(null, uniqueName);
-    }
-});
-const upload = multer({
-    storage,
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB
-});
-
 // 静态服务：图片目录
 app.use('/leave-images', express.static(IMAGE_DIR));
 
@@ -272,8 +301,7 @@ app.use((req, res, next) => {
     const isFromProxy = req.headers['x-forwarded-for'] || req.headers['x-real-ip'];
     
     if (!isLocalRequest && !isFromProxy) {
-        console.warn(`[安全] 拒绝直接访问 3001 端口: ${clientIP}`);
-        // 直接关闭连接，模拟连接失败
+        securityAlert('端口直连', `非法直接访问3001端口，已拒绝连接`, clientIP);
         res.destroy();
         return;
     }
@@ -282,6 +310,13 @@ app.use((req, res, next) => {
 
 // 中间件
 app.disable('x-powered-by');
+app.use(compression({ 
+    threshold: 1024,
+    filter: (req, res) => {
+        if (req.path === '/api/ollama/chat') return false;
+        return compression.filter(req, res);
+    }
+}));
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
@@ -289,18 +324,225 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: 'same-origin' }
 }));
 app.use(cors({
-    origin: true,
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        try {
+            const host = new URL(origin).hostname;
+            if (ALL_LOCAL_IPS.has(host)) return callback(null, true);
+        } catch (e) {}
+        callback(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: 86400000 }));
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '7d', etag: true }));
 
 // ===== 性能优化：信任反向代理 + 并发限制 =====
-app.set('trust proxy', true);
+app.set('trust proxy', 'loopback');
 app.set('etag', 'weak');
+
+// ========== 🔒 安全加固模块 ==========
+
+// 1. API 频率限制（防DDoS/CC攻击/爬虫）
+const globalLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 200,
+    message: { success: false, message: '请求过于频繁，请稍后再试' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1',
+    validate: { ip: false }
+});
+
+const apiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    message: { success: false, message: 'API请求过于频繁，请稍后再试' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1',
+    validate: { ip: false }
+});
+
+const strictLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: { success: false, message: '操作过于频繁，请稍后再试' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1',
+    validate: { ip: false }
+});
+
+app.use(globalLimiter);
+app.use('/api/', apiLimiter);
+app.use('/api/login', strictLimiter); // 登录接口更严格
+
+// 2. 爬虫/恶意 User-Agent 检测
+const KNOWN_BOTS = [
+    'AhrefsBot', 'MJ12bot', 'SemrushBot', 'DotBot', 'Bytespider',
+    'PetalBot', 'BLEXBot', 'Barkrowler', 'DataForSeoBot', 'ClaudeBot',
+    'GPTBot', 'ChatGPT-User', 'CCBot', 'Amazonbot', 'ImagesiftBot',
+    'YandexBot', 'Baiduspider', 'Sogou', '360Spider', 'HaosouSpider',
+    'python-requests', 'Go-http-client', 'curl', 'Wget', 'Scrapy',
+    'Java/', 'Apache-HttpClient', 'okhttp', 'fasthttp', 'axios',
+    'zgrab', 'ZGrab', 'masscan', 'nmap', 'Nikto', 'sqlmap', 'w3af'
+];
+
+function isKnownBot(ua) {
+    if (!ua) return false;
+    const lower = ua.toLowerCase();
+    return KNOWN_BOTS.some(bot => lower.includes(bot.toLowerCase()));
+}
+
+const botBlockedIPs = new Map(); // 被拦截的爬虫IP
+
+app.use((req, res, next) => {
+    const ip = req.ip || req.connection.remoteAddress || 'unknown';
+    const ua = req.headers['user-agent'] || '';
+    
+    if (!ua && !req.path.startsWith('/api/')) {
+        next();
+        return;
+    }
+    
+    if (isKnownBot(ua)) {
+        let record = botBlockedIPs.get(ip) || { count: 0, firstSeen: Date.now() };
+        record.count++;
+        botBlockedIPs.set(ip, record);
+        if (record.count >= 3) {
+            securityAlert('爬虫扫描', `已被拦截 ${record.count} 次，User-Agent: ${ua.substring(0, 80)}`, req);
+        }
+        return res.status(403).end();
+    }
+    next();
+});
+
+// 3. CSRF 防护：基于 Origin/Referer 校验（无需前端配合）
+app.use((req, res, next) => {
+    if (req.method === 'GET' || req.method === 'OPTIONS' || req.method === 'HEAD') {
+        return next();
+    }
+
+    const origin = req.headers['origin'];
+    const referer = req.headers['referer'];
+    const host = req.headers['host'];
+
+    if (!origin && !referer) {
+        return next();
+    }
+
+    let requestHost = null;
+    try {
+        if (origin) {
+            requestHost = new URL(origin).host;
+        } else if (referer) {
+            requestHost = new URL(referer).host;
+        }
+    } catch (e) {}
+
+    if (!requestHost) return next();
+
+    if (requestHost === host) return next();
+
+    if (host) {
+        const hostName = host.split(':')[0];
+        if (requestHost === hostName) return next();
+    }
+
+    securityAlert('CSRF攻击', `${req.method} ${req.path} origin=${origin || referer}`, req);
+    return res.status(403).json({ success: false, message: '安全验证失败' });
+});
+
+// 4. 输入清洗中间件（防XSS/SQL注入）
+function sanitizeValue(val) {
+    if (val === null || val === undefined) return val;
+    if (typeof val === 'number' || typeof val === 'boolean') return val;
+    if (typeof val === 'string') {
+        return xssFilters(val).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    }
+    if (Array.isArray(val)) return val.map(sanitizeValue);
+    if (typeof val === 'object') {
+        const cleaned = {};
+        for (const [k, v] of Object.entries(val)) {
+            cleaned[xssFilters(k)] = sanitizeValue(v);
+        }
+        return cleaned;
+    }
+    return val;
+}
+
+function detectSqlInjection(val) {
+    if (typeof val !== 'string') return false;
+    const patterns = [
+        /(\bUNION\b.*\bSELECT\b)/i, /(\bDROP\b.*\bTABLE\b)/i,
+        /(\bALTER\b.*\bTABLE\b)/i, /(\bDELETE\b.*\bFROM\b)/i,
+        /(\bINSERT\b.*\bINTO\b)/i, /(\bEXEC\b.*\bxp_\w+)/i,
+        /(--\s*$)/, /(;.*\bDROP\b)/i, /(;.*\bDELETE\b)/i,
+        /(';.*\bSELECT\b)/i, /(\bSLEEP\s*\()/i,
+        /(\bBENCHMARK\s*\()/i, /(\bWAITFOR\s+DELAY\b)/i
+    ];
+    return patterns.some(p => p.test(val));
+}
+
+app.use((req, res, next) => {
+    if (req.body && typeof req.body === 'object') {
+        for (const [key, val] of Object.entries(req.body)) {
+            if (typeof val === 'string' && detectSqlInjection(val)) {
+                securityAlert('SQL注入', `请求体字段"${key}"包含注入特征: ${val.substring(0, 100)}`, req);
+                return res.status(403).json({ success: false, message: '请求包含非法内容' });
+            }
+        }
+        req.body = sanitizeValue(req.body);
+    }
+    if (req.query && typeof req.query === 'object') {
+        for (const [key, val] of Object.entries(req.query)) {
+            if (typeof val === 'string' && detectSqlInjection(val)) {
+                securityAlert('SQL注入', `查询参数"${key}"包含注入特征: ${val.substring(0, 100)}`, req);
+                return res.status(403).json({ success: false, message: '请求包含非法内容' });
+            }
+        }
+        req.query = sanitizeValue(req.query);
+    }
+    if (req.params && typeof req.params === 'object') {
+        req.params = sanitizeValue(req.params);
+    }
+    next();
+});
+
+// 5. 文件上传类型校验（multer fileFilter）
+const ALLOWED_MIME = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'application/octet-stream',
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp'
+];
+
+const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
+const fileFilter = (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        securityAlert('恶意文件', `阻止上传: ${file.originalname} (${file.mimetype})`, req);
+        return cb(new Error('不允许的文件类型，仅支持Excel和图片文件'), false);
+    }
+    cb(null, true);
+};
+
+const secureUpload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => cb(null, IMAGE_DIR),
+        filename: (req, file, cb) => {
+            const uniqueName = Date.now() + '-' + Math.random().toString(36).substring(2, 8) + path.extname(file.originalname);
+            cb(null, uniqueName);
+        }
+    }),
+    fileFilter,
+    limits: { fileSize: 10 * 1024 * 1024 }
+});
 
 // ===== Web 应用防火墙 (WAF)：登录暴力破解防护 =====
 const loginAttempts = new Map(); // IP -> { count, lastAttempt, lockedUntil }
@@ -329,7 +571,7 @@ function recordFailedLogin(req) {
     record.lastAttempt = now;
     if (record.count >= LOGIN_RATE_LIMIT) {
         record.lockedUntil = now + LOGIN_LOCKOUT_MINUTES * 60 * 1000;
-        console.warn(`[WAF] IP ${ip} 登录失败${record.count}次，已锁定 ${LOGIN_LOCKOUT_MINUTES} 分钟`);
+        securityAlert('暴力破解', `登录失败${record.count}次，IP已被锁定 ${LOGIN_LOCKOUT_MINUTES} 分钟`, ip);
     }
     loginAttempts.set(ip, record);
     // 清理过期的记录（每小时一次）
@@ -423,12 +665,12 @@ const accountFailedAttempts = new Map(); // employee_id -> { count, lastAttempt 
 const CAPTCHA_THRESHOLD = 2;  // 失败2次后需要验证码
 const FREEZE_THRESHOLD = 6;   // 失败6次后冻结账户
 
-function recordAccountFailed(employee_id) {
+function recordAccountFailed(employee_id, ip) {
     let record = accountFailedAttempts.get(employee_id) || { count: 0, lastAttempt: 0 };
     record.count++;
     record.lastAttempt = Date.now();
     accountFailedAttempts.set(employee_id, record);
-    console.warn('[警告] 账号 ' + employee_id + ' 登录失败 ' + record.count + ' 次');
+    securityAlert('登录爆破', `账号 ${employee_id} 登录失败 ${record.count} 次`, ip || employee_id);
 }
 
 function getAccountFailedCount(employee_id) {
@@ -484,13 +726,13 @@ function recordCaptchaFailed(ip) {
         record.lockTime = Date.now();
         record.lockFailCount = record.totalFails;
         record.reason = '累计验证码验证失败次数过多';
-        console.warn('[警告] IP已锁定(' + record.totalFails + '次累计失败): ' + ip + ' 原因: ' + record.reason);
+        securityAlert('验证码爆破', `累计${record.totalFails}次验证失败，IP已被永久锁定，原因: ${record.reason}`, ip);
         record.captchaFails = 0;
         record.totalFails = 0;
         record.cooldownUntil = 0;
     } else if (record.captchaFails >= CAPTCHA_FAIL_COOLDOWN_THRESHOLD) {
         record.cooldownUntil = Date.now() + COOLDOWN_TIME_MS;
-        console.warn('[警告] IP进入冷却(' + record.captchaFails + '/' + record.totalFails + '次失败): ' + ip + ' 冷却结束: ' + new Date(record.cooldownUntil).toLocaleString());
+        securityAlert('验证码爆破', `第${record.captchaFails}次验证失败(累计${record.totalFails})，IP进入${COOLDOWN_TIME_MS/60000}分钟冷却`, ip);
     }
 }
 
@@ -546,7 +788,7 @@ const sessionStore = new MySQLSessionStore({
     database: DB_CONFIG.database,
     createDatabaseTable: true,
     clearExpired: true,
-    checkExpirationInterval: 900000,
+    checkExpirationInterval: 3600000,
     expiration: 86400000 * 7
 });
 const sessionMiddleware = session({
@@ -557,6 +799,7 @@ const sessionMiddleware = session({
     cookie: {
         maxAge: null,
         httpOnly: true,
+        secure: true,
         sameSite: 'lax'
     }
 });
@@ -783,12 +1026,14 @@ app.get('/api/slide-captcha/generate', (req, res) => {
         const ip = getClientIP(req);
 
         if (isIpLocked(ip)) {
+            securityAlert('IP已锁定', `被锁定IP尝试获取验证码，已拒绝`, ip);
             return res.status(403).json({ success: false, locked: true, message: '您的IP已被临时禁止访问，请联系管理员' });
         }
 
         if (isIpInCooldown(ip)) {
             const record = getIpRecord(ip);
             const remaining = Math.ceil((record.cooldownUntil - Date.now()) / 1000);
+            securityAlert('IP冷却', `冷却期IP尝试获取验证码，剩余${remaining}秒`, ip);
             return res.status(429).json({ success: false, cooldown: true, remaining: remaining, message: '验证失败次数过多，请等待 ' + remaining + ' 秒后重试' });
         }
 
@@ -821,6 +1066,7 @@ app.post('/api/slide-captcha/verify', (req, res) => {
     
     // 检查IP是否被锁定
     if (isIpLocked(ip)) {
+        securityAlert('IP已锁定', `被锁定IP尝试验证验证码，已拒绝`, ip);
         return res.status(403).json({ success: false, message: '您的IP已被临时禁止访问，请联系管理员' });
     }
     
@@ -828,6 +1074,7 @@ app.post('/api/slide-captcha/verify', (req, res) => {
     if (isIpInCooldown(ip)) {
         const record = getIpRecord(ip);
         const remaining = Math.ceil((record.cooldownUntil - Date.now()) / 1000);
+        securityAlert('IP冷却', `冷却期IP尝试验证验证码，剩余${remaining}秒`, ip);
         return res.status(429).json({ 
             success: false, 
             message: `验证失败次数过多，请等待 ${remaining} 秒后重试` 
@@ -876,6 +1123,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     
     // 检查IP是否被锁定
     if (isIpLocked(ip)) {
+        securityAlert('IP已锁定', `被锁定的IP尝试登录，已拒绝`, req);
         logEvent(`IP ${ip} 已锁定，拒绝登录请求`, req);
         return res.status(403).json({ success: false, message: '您的IP已被临时禁止访问，请联系管理员' });
     }
@@ -883,6 +1131,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     // 检查是否为异常账号
     if (abnormalAccounts.has(employee_id)) {
         const acc = abnormalAccounts.get(employee_id);
+        securityAlert('账号冻结', `已冻结账号 ${acc.name}(${employee_id}) 尝试登录，已拒绝`, req);
         logEvent(`账号 ${acc.name}(${employee_id}) 异常，已被冻结`, req);
         return res.status(403).json({ success: false, message: '账户异常，请联系管理员' });
     }
@@ -907,9 +1156,9 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
             const isMatch = bcrypt.compareSync(password, user.password);
             if (!isMatch) {
                 recordFailedLogin(req);
-                recordAccountFailed(employee_id);
+                recordAccountFailed(employee_id, ip);
                 if (getAccountFailedCount(employee_id) >= FREEZE_THRESHOLD) {
-                    freezeAccount(employee_id, user.id, user.name);
+                    freezeAccount(employee_id, user.id, user.name, ip);
                     return res.status(403).json({ success: false, message: '账户已被冻结，请联系管理员' });
                 }
                 return res.status(401).json({ success: false, message: '密码错误' });
@@ -958,7 +1207,7 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
     
     if (!user) {
         recordFailedLogin(req);
-        recordAccountFailed(employee_id);
+        recordAccountFailed(employee_id, ip);
         logEvent(`登录失败（账号不存在）: ${employee_id}`, req, '', 'warn');
         if (getAccountFailedCount(employee_id) >= FREEZE_THRESHOLD) {
             return res.status(403).json({ success: false, message: '账户已被冻结，请联系管理员' });
@@ -970,10 +1219,10 @@ app.post('/api/login', rateLimitLogin, async (req, res) => {
 
     if (!isMatch) {
         recordFailedLogin(req);
-        recordAccountFailed(employee_id);
+        recordAccountFailed(employee_id, ip);
         logEvent(`登录失败（密码错误）: ${employee_id}`, req, '', 'warn');
         if (getAccountFailedCount(employee_id) >= FREEZE_THRESHOLD) {
-            freezeAccount(employee_id, user.id, user.name);
+            freezeAccount(employee_id, user.id, user.name, ip);
             return res.status(403).json({ success: false, message: '账户已被冻结，请联系管理员' });
         }
         return res.status(401).json({ success: false, message: '账号或密码错误' });
@@ -1042,11 +1291,11 @@ async function findOrCreateClass(classNo) {
 }
 
 // 冻结账户
-function freezeAccount(employee_id, userId, name) {
+function freezeAccount(employee_id, userId, name, ip) {
     if (!abnormalAccounts.has(employee_id)) {
         abnormalAccounts.set(employee_id, { userId, name, time: new Date() });
-        console.warn('[警告] 账号 ' + name + '(' + employee_id + ') 已被冻结（失败次数过多）');
-        logEvent('账号 ' + name + '(' + employee_id + ') 因失败次数过多被冻结', { ip: 'system' });
+        securityAlert('账号冻结', `账号 ${name}(${employee_id}) 因登录失败次数过多已被冻结`, ip || 'system');
+        logEvent('账号 ' + name + '(' + employee_id + ') 因失败次数过多被冻结', { ip: ip || 'system' });
     }
 }
 
@@ -1314,12 +1563,17 @@ function validateAccountId(employee_id, role) {
 
 // ============ 用户管理 ============
 
-// 获取用户列表（包含密码）
+// 获取用户列表（管理员可见密码，其他角色不可见）
 app.get('/api/users', requireAuth, async (req, res) => {
     try {
         const users = await database.all('SELECT id, employee_id, name, plain_password, role FROM users');
         logEvent('查询用户列表', req, `共${users.length}个用户`);
-        res.json({ success: true, data: users });
+        const isAdmin = req.session.user.role === 'admin';
+        const data = isAdmin ? users : users.map(u => {
+            const { plain_password, ...rest } = u;
+            return rest;
+        });
+        res.json({ success: true, data });
     } catch (err) {
         console.error('[API /api/users] 错误:', err.message);
         res.json({ success: true, data: [] });
@@ -1553,7 +1807,7 @@ app.get('/api/download-template/club', requireAuth, requireCourseManager, async 
     }
 });
 
-app.post('/api/substitute-teachers/import', requireAuth, requireCourseManager, upload.single('file'), async (req, res) => {
+app.post('/api/substitute-teachers/import', requireAuth, requireCourseManager, secureUpload.single('file'), async (req, res) => {
     if (!req.file) return res.json({ success: false, message: '请上传Excel文件' });
     try {
         const ExcelJS = require('exceljs');
@@ -2956,14 +3210,20 @@ app.get('/api/teacher/latest-exam-for-class', requireAuth, async (req, res) => {
     }
 });
 
-// ===== 监控用：获取在线用户数 =====
-app.get('/api/monitor/online-count', (req, res) => {
+// ===== 监控用：获取在线用户数（仅管理员可查看）=====
+app.get('/api/monitor/online-count', requireAuth, (req, res) => {
+    if (req.session.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: '仅管理员可查看' });
+    }
     res.json({ count: userSessions.size });
 });
 
-// ===== 异常IP管理API =====
+// ===== 异常IP管理API（仅管理员可操作）=====
 // 获取所有锁定IP
-app.get('/api/monitor/locked-ips', (req, res) => {
+app.get('/api/monitor/locked-ips', requireAuth, (req, res) => {
+    if (req.session.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: '仅管理员可查看' });
+    }
     try {
         const lockedIps = getLockedIps();
         res.json({ success: true, data: lockedIps });
@@ -2973,8 +3233,11 @@ app.get('/api/monitor/locked-ips', (req, res) => {
     }
 });
 
-// 解锁IP
-app.post('/api/monitor/unlock-ip', (req, res) => {
+// 解锁IP（仅管理员可操作）
+app.post('/api/monitor/unlock-ip', requireAuth, (req, res) => {
+    if (req.session.user.role !== 'admin') {
+        return res.status(403).json({ success: false, message: '仅管理员可执行此操作' });
+    }
     const { ip } = req.body;
     if (!ip) {
         return res.status(400).json({ success: false, message: 'IP地址不能为空' });
@@ -3420,7 +3683,7 @@ app.get('/api/homework', requireAuth, async (req, res) => {
 
 // 添加或更新作业数据
 app.post('/api/homework/save', requireAuth, async (req, res) => {
-    const { semester, subject, content, class_id } = req.body;
+    const { semester, subject, content, class_id, id } = req.body;
     const currentUser = req.session.user;
     if (!semester || !subject) {
         return res.json({ success: false, message: '学期和学科不能为空' });
@@ -3428,7 +3691,11 @@ app.post('/api/homework/save', requireAuth, async (req, res) => {
     try {
         const existing = await database.get('SELECT id FROM homework WHERE semester = ? AND subject = ? AND class_id <=> ?', [semester, subject, class_id || null]);
         if (existing) {
-            await database.run('UPDATE homework SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [content || '', existing.id]);
+            if (id && existing.id == id) {
+                await database.run('UPDATE homework SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [content || '', id]);
+            } else {
+                return res.json({ success: false, message: `该学期下学科"${subject}"已存在` });
+            }
         } else {
             await database.run('INSERT INTO homework (semester, subject, content, class_id, created_by) VALUES (?, ?, ?, ?, ?)', 
                 [semester, subject, content || '', class_id || null, currentUser.name || '']);
@@ -3468,7 +3735,7 @@ app.get('/api/homework/sample', requireAuth, (req, res) => {
 });
 
 // 批量导入作业数据
-app.post('/api/homework/import', requireAuth, upload.single('file'), async (req, res) => {
+app.post('/api/homework/import', requireAuth, secureUpload.single('file'), async (req, res) => {
     const { semester, class_id } = req.body;
     const currentUser = req.session.user;
     if (!semester) {
@@ -3713,13 +3980,7 @@ app.post('/api/homework-data/save', requireAuth, async (req, res) => {
     }
 });
 
-// 后台管理页面
-app.get('/admin', (req, res) => {
-    if (!req.session.user) {
-        return res.redirect('/login');
-    }
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
+
 
 // 清除所有数据（仅限管理员）
 app.post('/api/admin/clear-all-data', requireAuth, async (req, res) => {
@@ -3738,9 +3999,10 @@ app.post('/api/admin/clear-all-data', requireAuth, async (req, res) => {
         await database.run('DELETE FROM exams');
         // 保留用户表，但清除普通用户（保留管理员）
         await database.run("DELETE FROM users WHERE role != 'admin'");
-        // 重置管理员密码确保可用
-        const hashedPassword = bcrypt.hashSync('admin123', 10);
-        await database.run("UPDATE users SET password = ?, plain_password = 'admin123' WHERE employee_id = 'admin'", [hashedPassword]);
+        // 从环境变量读取管理员密码，确保不硬编码
+        const adminPassword = process.env.DEFAULT_ADMIN_PASS || 'admin123';
+        const hashedPassword = bcrypt.hashSync(adminPassword, 10);
+        await database.run("UPDATE users SET password = ?, plain_password = ? WHERE employee_id = 'admin'", [hashedPassword, adminPassword]);
         
         res.json({ success: true, message: '所有数据已清除（保留管理员账号）' });
     } catch (err) {
@@ -3785,7 +4047,7 @@ app.get('/api/attendance', requireAuth, async (req, res) => {
 // ===== 请假单图片上传/删除 =====
 
 // 上传请假单图片
-app.post('/api/attendance/leave-image/upload', requireAuth, upload.array('images', 20), async (req, res) => {
+app.post('/api/attendance/leave-image/upload', requireAuth, secureUpload.array('images', 20), async (req, res) => {
     try {
         const { class_id, student_id, date } = req.body;
         if (!class_id || !student_id || !date) {
@@ -3943,13 +4205,7 @@ app.post('/api/attendance/export', requireAuth, async (req, res) => {
     }
 });
 
-// 成绩分析页面
-app.get('/dashboard', (req, res) => {
-    if (!req.session.user) {
-        return res.redirect('/login');
-    }
-    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-});
+
 
 // ===== 学生周期统计 API =====
 app.get('/api/student/period-stats', requireAuth, async (req, res) => {
@@ -4150,6 +4406,10 @@ async function buildTeacherContext(user, page, selection) {
     const classInfo = await database.get('SELECT * FROM classes WHERE id = ?', [classId]);
     if (!classInfo) return buildDefaultTeacherContext(user);
 
+    if (user.role === 'teacher' && classInfo.user_id !== user.id) {
+        return '错误：无权访问该班级数据，您只能查看自己创建的班级。';
+    }
+
     const pageLabel = pageToLabel(page);
     const lines = [];
 
@@ -4184,18 +4444,18 @@ async function buildTeacherContext(user, page, selection) {
         lines.push('- 用户说"再次分析/重新分析/分析"→基于以上当前学生数据重新分析，忽略对话历史中的旧学生名');
         lines.push('- 用户说"班级/全班/整体/美丽学分"→切换至班级数据');
         lines.push('- 用户说"成绩/考试/排名/单科"→用学生成绩数据回答');
+        lines.push('- 用户说"作业/提交/缺交/未交/补交/本月作业"→用【班级作业未提交数据】中的数据回答');
         lines.push('【重要】如果对话历史中出现了不同于当前学生的姓名，请完全忽略，只分析以上显示的当前学生数据。');
     } else {
         lines.push(`- 默认分析【当前页面】(${pageLabel})的数据`);
         lines.push('- 用户说"成绩/考试/排名/平均分/科目/总分"→用【考试成绩数据】回答');
         lines.push('- 用户说"美丽学分/学分/积分/事件/扣分/加分"→用【美丽学分数据】回答');
-        lines.push('- 用户说"作业/提交/缺交/未交/补交"→用【作业未提交数据】回答，禁止输出美丽学分');
-        lines.push('- 回答作业问题时：只输出未提交统计，不要建议联系班主任、德育组等');
+        lines.push('- 用户说"作业/提交/缺交/未交/补交/本月作业"→用【班级作业未提交数据】中的真实数据回答，列出具体学生姓名、学科和次数');
+        lines.push('- 回答作业问题时：输出本月未提交/补交统计，按学科列出学生名单。格式参考："本月XX学科共有N人未交：张三、李四；N人补交：王五。" 不要建议联系班主任、德育组等');
         lines.push('- 回答美丽学分问题时：只输出班级名单中的数据，学生在则展示积分，不在则告知"班级名单中无此人，请核对姓名或学号"。不要建议联系班主任、德育组等');
     }
     lines.push('- 用户说"再次分析/重新分析"→请基于以上当前数据重新分析，不要沿用对话历史中的旧数据');
-    lines.push('- 用户说"作业/提交/缺交"→用作业数据回答');
-    lines.push('【回复要求】简洁精炼，只输出核心结论与可行建议，控制篇幅不啰嗦。');
+    lines.push('【回复要求】简洁精炼，只输出核心结论与可行建议，控制篇幅不啰嗦。对于作业问题，必须列出真实学生姓名和学科，不能泛泛而谈。');
 
     const contextText = lines.join('\n');
     console.log('[DEBUG buildTeacherContext] 返回上下文长度:', contextText.length);
@@ -4287,6 +4547,14 @@ async function buildCompactHomeworkLines(classId, selection) {
     const semester = selection.semester || '';
     const subject = selection.subject || '';
 
+    // 默认查询当前月份数据
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const monthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
+    const lastDay = new Date(currentYear, currentMonth, 0).getDate();
+    const monthEnd = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
     let query = 'SELECT hd.*, s.name as student_name, s.student_id FROM homework_data hd JOIN students s ON hd.student_id = s.id WHERE s.class_id = ?';
     const params = [classId];
 
@@ -4299,38 +4567,78 @@ async function buildCompactHomeworkLines(classId, selection) {
         params.push(subject);
     }
 
-    console.log('[DEBUG buildCompactHomeworkLines] SQL:', query);
-    console.log('[DEBUG buildCompactHomeworkLines] params:', params);
-    const allData = await database.all(query + ' ORDER BY hd.date DESC', params);
-    console.log('[DEBUG buildCompactHomeworkLines] 结果条数:', allData ? allData.length : 'null');
+    // 默认限定本月
+    query += ' AND hd.date >= ? AND hd.date <= ?';
+    params.push(monthStart, monthEnd);
 
-    if (!allData.length) {
-        lines.push('暂无作业数据');
+    const allData = await database.all(query + ' ORDER BY hd.date DESC', params);
+
+    if (!allData || !allData.length) {
+        lines.push('本月暂无作业数据');
         return lines;
     }
 
-    const unsubmitted = allData.filter(d => d.submitted === 0);
     const total = allData.length;
-    const submittedCount = total - unsubmitted.length;
+    const unsubmittedOnly = allData.filter(d => d.submitted === 0 && d.late !== 1);
+    const lateSubmitted = allData.filter(d => d.submitted === 0 && d.late === 1);
+    const submittedCount = total - unsubmittedOnly.length - lateSubmitted.length;
     const rate = total > 0 ? ((submittedCount / total) * 100).toFixed(1) : '0';
 
-    lines.push(`总体：${total}条记录，已提交${submittedCount}条，未提交${unsubmitted.length}条，提交率${rate}%`);
+    lines.push(`本月(${monthStart}~${monthEnd})作业：共${total}条记录 | 已提交${submittedCount}条 | 未交${unsubmittedOnly.length}条 | 补交${lateSubmitted.length}条 | 提交率${rate}%`);
 
-    if (unsubmitted.length > 0) {
+    // 按学科统计
+    const bySubject = {};
+    allData.forEach(d => {
+        if (!bySubject[d.subject]) bySubject[d.subject] = { total: 0, unsubmitted: [], late: [] };
+        bySubject[d.subject].total++;
+        if (d.submitted === 0) {
+            if (d.late === 1) {
+                bySubject[d.subject].late.push(d.student_name || d.student_id);
+            } else {
+                bySubject[d.subject].unsubmitted.push(d.student_name || d.student_id);
+            }
+        }
+    });
+
+    const subjects = Object.keys(bySubject).sort();
+    if (subjects.length > 0) {
+        lines.push('');
+        lines.push('【各学科作业情况】');
+        for (const subj of subjects) {
+            const stat = bySubject[subj];
+            const totalS = stat.total;
+            const unsubCount = stat.unsubmitted.length;
+            const lateCount = stat.late.length;
+            const subRate = totalS > 0 ? ((totalS - unsubCount - lateCount) / totalS * 100).toFixed(1) : '0';
+            lines.push(`${subj}：共${totalS}条 | 提交率${subRate}% | 未交${unsubCount}人：${stat.unsubmitted.join('、') || '无'} | 补交${lateCount}人：${stat.late.join('、') || '无'}`);
+        }
+    }
+
+    // 按学生统计
+    const allWithIssues = [...unsubmittedOnly, ...lateSubmitted];
+    if (allWithIssues.length > 0) {
         const byStudent = {};
-        unsubmitted.forEach(d => {
+        allWithIssues.forEach(d => {
             const key = d.student_name || d.student_id;
-            if (!byStudent[key]) byStudent[key] = { count: 0, student_id: d.student_id, subjects: {} };
-            byStudent[key].count++;
-            byStudent[key].subjects[d.subject] = (byStudent[key].subjects[d.subject] || 0) + 1;
+            if (!byStudent[key]) byStudent[key] = { student_id: d.student_id, unsubmitted: [], late: [] };
+            if (d.late === 1) {
+                byStudent[key].late.push(d.subject);
+            } else {
+                byStudent[key].unsubmitted.push(d.subject);
+            }
         });
 
-        const sorted = Object.entries(byStudent).sort((a, b) => b[1].count - a[1].count);
+        const sorted = Object.entries(byStudent).sort((a, b) =>
+            (b[1].unsubmitted.length + b[1].late.length) - (a[1].unsubmitted.length + a[1].late.length)
+        );
+
         lines.push('');
-        lines.push('【未提交作业学生统计】');
+        lines.push('【缺交/补交学生明细】');
         sorted.forEach(([name, info]) => {
-            const subjectStr = Object.entries(info.subjects).map(([s, c]) => `${s}×${c}`).join(', ');
-            lines.push(`${name}(${info.student_id})：缺交${info.count}次 [${subjectStr}]`);
+            const parts = [];
+            if (info.unsubmitted.length > 0) parts.push(`未交：${info.unsubmitted.join('、')}`);
+            if (info.late.length > 0) parts.push(`补交：${info.late.join('、')}`);
+            lines.push(`${name}(${info.student_id})：${parts.join(' | ')}`);
         });
     }
 
@@ -5259,8 +5567,133 @@ async function buildTotalTableContext(user, selection) {
 }
 
 async function buildHomeworkDataContext(user, selection) {
-    return `【系统要求】
-无论用户问什么，你只回复这一句话：功能正在开发，敬请期待`;
+    const lines = [];
+    lines.push('【当前用户信息】');
+    lines.push(`姓名：${user.name}，角色：教师（班主任）`);
+    lines.push('');
+
+    const classId = selection.class_id || user.class_id;
+    const classes = classId
+        ? [await database.get('SELECT * FROM classes WHERE id = ?', [classId])].filter(Boolean)
+        : await database.all('SELECT * FROM classes WHERE user_id = ? ORDER BY id', [user.id]);
+
+    if (!classes.length) {
+        lines.push('暂无班级数据');
+        return lines.join('\n');
+    }
+
+    const semester = selection.semester || '';
+
+    // 计算当前月份
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const monthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
+    const lastDay = new Date(currentYear, currentMonth, 0).getDate();
+    const monthEnd = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    lines.push(`【本月作业数据】分析范围：${monthStart} 至 ${monthEnd}`);
+    lines.push('');
+
+    for (const cls of classes) {
+        lines.push(`=== ${cls.name} ===`);
+
+        let homeworkQuery = 'SELECT hd.date, hd.subject, hd.submitted, hd.late, s.name as student_name, s.student_id FROM homework_data hd JOIN students s ON hd.student_id = s.id WHERE s.class_id = ? AND hd.date >= ? AND hd.date <= ?';
+        const homeworkParams = [cls.id, monthStart, monthEnd];
+
+        if (semester) {
+            homeworkQuery += ' AND hd.semester = ?';
+            homeworkParams.push(semester);
+        }
+
+        homeworkQuery += ' ORDER BY hd.date DESC, hd.subject, s.student_id';
+        const allHomeworks = await database.all(homeworkQuery, homeworkParams);
+
+        if (!allHomeworks || !allHomeworks.length) {
+            lines.push('  本月暂无作业数据');
+            lines.push('');
+            continue;
+        }
+
+        // 按学科分组统计
+        const bySubject = {};
+        const allStudents = new Set();
+        allHomeworks.forEach(h => {
+            if (!bySubject[h.subject]) bySubject[h.subject] = { total: 0, unsubmitted: [], late: [] };
+            bySubject[h.subject].total++;
+            allStudents.add(h.student_name + '|' + h.student_id);
+            if (h.submitted === 0) {
+                if (h.late === 1) {
+                    bySubject[h.subject].late.push(h.student_name || h.student_id);
+                } else {
+                    bySubject[h.subject].unsubmitted.push(h.student_name || h.student_id);
+                }
+            }
+        });
+
+        const totalRecords = allHomeworks.length;
+        const totalUnsubmitted = allHomeworks.filter(h => h.submitted === 0 && h.late !== 1).length;
+        const totalLate = allHomeworks.filter(h => h.submitted === 0 && h.late === 1).length;
+        const submitRate = totalRecords > 0 ? ((totalRecords - totalUnsubmitted - totalLate) / totalRecords * 100).toFixed(1) : '0';
+
+        lines.push(`  总体：${totalRecords}条记录 | 已提交${totalRecords - totalUnsubmitted - totalLate}条 | 未交${totalUnsubmitted}条 | 补交${totalLate}条 | 提交率${submitRate}%`);
+        lines.push('');
+
+        const subjects = Object.keys(bySubject).sort();
+        lines.push('  【按学科统计】');
+        for (const subj of subjects) {
+            const stat = bySubject[subj];
+            const subTotal = stat.total;
+            const unsubCount = stat.unsubmitted.length;
+            const lateCount = stat.late.length;
+            lines.push(`    ${subj}：共${subTotal}条 | 未交${unsubCount}人：${stat.unsubmitted.join('、') || '无'} | 补交${lateCount}人：${stat.late.join('、') || '无'}`);
+        }
+        lines.push('');
+
+        // 按学生统计
+        const byStudent = {};
+        allHomeworks.forEach(h => {
+            const key = h.student_name || h.student_id;
+            if (!byStudent[key]) byStudent[key] = { student_id: h.student_id, total: 0, unsubmitted: [], late: [], subjects: {} };
+            byStudent[key].total++;
+            if (h.submitted === 0) {
+                if (h.late === 1) {
+                    byStudent[key].late.push(h.subject);
+                } else {
+                    byStudent[key].unsubmitted.push(h.subject);
+                }
+                if (!byStudent[key].subjects[h.subject]) byStudent[key].subjects[h.subject] = { unsubmitted: 0, late: 0 };
+                if (h.late === 1) {
+                    byStudent[key].subjects[h.subject].late++;
+                } else {
+                    byStudent[key].subjects[h.subject].unsubmitted++;
+                }
+            }
+        });
+
+        const studentsWithIssues = Object.values(byStudent).filter(s => s.unsubmitted.length > 0 || s.late.length > 0);
+        if (studentsWithIssues.length > 0) {
+            studentsWithIssues.sort((a, b) => (b.unsubmitted.length + b.late.length) - (a.unsubmitted.length + a.late.length));
+            lines.push('  【缺交学生明细】');
+            for (const s of studentsWithIssues) {
+                const parts = [];
+                if (s.unsubmitted.length > 0) parts.push(`未交：${s.unsubmitted.join('、')}`);
+                if (s.late.length > 0) parts.push(`补交：${s.late.join('、')}`);
+                lines.push(`    ${s.student_id}：${parts.join(' | ')}`);
+            }
+        }
+        lines.push('');
+    }
+
+    lines.push('【智能分析规则】');
+    lines.push('- 回答作业问题时严格基于以上【本月作业数据】，使用真实姓名、学科和数字');
+    lines.push('- 用户问\"本月作业情况\"→输出各学科的未交/补交统计和学生名单');
+    lines.push('- 用户问\"哪些人未交作业/谁没交\"→列出具体姓名、学科和未交次数');
+    lines.push('- 用户问\"补交/迟交\"→列出补交学生名单和对应学科');
+    lines.push('- 用户问\"提交率\"→输出总体和各学科提交率');
+    lines.push('- 回答要具体，用真实数据，不要泛泛而谈');
+
+    return lines.join('\n');
 }
 
 async function buildDefaultTeacherContext(user) {
@@ -5868,7 +6301,42 @@ async function buildStudentContext(user, page, selection) {
     lines.push('2. 指出优势和薄弱学科；');
     lines.push('3. 如果有多次考试成绩，分析成绩趋势（进步/退步/稳定）；');
     lines.push('4. 给出具体的学习改进建议和努力方向。');
+    lines.push('用户问"作业/缺交/未交"→告知自身缺交情况；');
     lines.push('请用中文回答，语气亲切鼓励，控制在300字以内。注意：输出文本结尾不要加上"柯宇"这个教师名字。');
+
+    // 学生个人作业数据
+    const homeworkMissing = await database.all(`
+        SELECT date, subject, late
+        FROM homework_data
+        WHERE student_id = ? AND submitted = 0
+        ORDER BY date DESC
+    `, [student.id]);
+
+    if (homeworkMissing.length > 0) {
+        // 本月筛选
+        const now = new Date();
+        const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const thisMonth = homeworkMissing.filter(h => h.date >= monthStart);
+        const lateSubmitted = homeworkMissing.filter(h => h.late === 1);
+
+        lines.push('');
+        lines.push('【个人作业数据】');
+        lines.push(`本月未交${thisMonth.length}次，累计未交${homeworkMissing.length}次（含补交${lateSubmitted.length}次）`);
+        if (thisMonth.length > 0) {
+            const bySubject = {};
+            thisMonth.forEach(h => {
+                if (!bySubject[h.subject]) bySubject[h.subject] = { unsubmitted: 0, late: 0 };
+                if (h.late === 1) bySubject[h.subject].late++;
+                else bySubject[h.subject].unsubmitted++;
+            });
+            for (const [subj, stat] of Object.entries(bySubject)) {
+                const parts = [];
+                if (stat.unsubmitted > 0) parts.push(`${stat.unsubmitted}次未交`);
+                if (stat.late > 0) parts.push(`${stat.late}次补交`);
+                lines.push(`  ${subj}：${parts.join('，')}`);
+            }
+        }
+    }
 
     return lines.join('\n');
 }
@@ -5877,7 +6345,7 @@ async function buildStudentContext(user, page, selection) {
 app.post('/api/ollama/chat', requireAuth, async (req, res) => {
     try {
         const { model, messages, stream } = req.body;
-        const apiKey = 'sk-79d6dec0d9704699be000aa0d14d5b55';
+        const apiKey = process.env.QWEN_API_KEY;
         const qwenHost = 'dashscope.aliyuncs.com';
 
         const user = req.session && req.session.user;

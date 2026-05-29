@@ -64,8 +64,11 @@ async function logout() {
             Collab.disconnect();
         }
     } catch (e) {}
+    // 清理所有 localStorage 相关项
     localStorage.removeItem('sidebarUserAvatar');
     localStorage.removeItem('sidebarUserName');
+    localStorage.removeItem('dashboardExamId');
+    localStorage.removeItem('dashboardClassId');
     window.location.replace('/login');
 }
 
@@ -615,8 +618,11 @@ function renderRadarChart(subjects) {
 // 初始化
 (async function init() {
     const user = await checkAuth();
+    if (!user) {
+        return; // checkAuth 失败会重定向,直接返回
+    }
     if (window.Collab) Collab.connect();
-    if (user && user.role === 'student') {
+    if (user.role === 'student') {
         setupStudentView();
     } else {
         initCharts();

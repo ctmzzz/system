@@ -271,10 +271,13 @@
                 return;
             }
 
+            const body = { semester, subject, content, class_id: classId || null };
+            if (currentEditId) body.id = currentEditId;
+
             fetch('/api/homework/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ semester, subject, content, class_id: classId || null })
+                body: JSON.stringify(body)
             })
             .then(r => r.json())
             .then(data => {

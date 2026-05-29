@@ -18,6 +18,7 @@
     var startHeight = 0;
     var lastChatPage = null; // 记录上次打开对话时的页面
     var isStreaming = false; // 是否正在流式输出
+    var isSending = false;   // 是否正在发送消息（毫秒级防重复点击）
     var currentController = null; // 当前请求的AbortController
     var currentTimeoutId = null; // 当前超时定时器
     var currentBotBubble = null; // 当前正在输出的bot气泡
@@ -547,8 +548,12 @@
     async function sendMessage() {
         var input = document.getElementById('aiChatInput');
         var text = input.value.trim();
-        if (!text || isStreaming) return;
+        if (!text || isSending || isStreaming) return;
+
+        isSending = true;
         isUserStopped = false;
+        input.disabled = true;
+        updateSendButton(true);
 
         // 教师端：首次提问先刷新上下文（获取考试班级数据），但不自动分析
         if (userRole === 'teacher' && messages.length === 0) {
@@ -557,7 +562,12 @@
         // 学生端：首次提问先自动分析
         else if (messages.length === 0) {
             await doInitialAnalysis();
-            if (messages.length === 0) return;
+            if (messages.length === 0) {
+                isSending = false;
+                input.disabled = false;
+                updateSendButton(false);
+                return;
+            }
         }
         // 非首次提问都刷新上下文
         else {
@@ -566,7 +576,6 @@
 
         messages.push({ role: 'user', content: text });
         input.value = '';
-        input.disabled = true;
 
         addUserMessage(text);
         var botBubble = createBotBubble();
@@ -575,13 +584,11 @@
         var controller = new AbortController();
         var timeoutId = setTimeout(function() { controller.abort(); }, 5000);
 
-        // 设置全局状态
         isStreaming = true;
         currentController = controller;
         currentTimeoutId = timeoutId;
         currentBotBubble = botBubble;
         currentBotText = '';
-        updateSendButton(true);
 
         try {
             var response = await fetch(PROXY_URL, {
@@ -668,6 +675,7 @@
         }
 
         // 重置状态
+        isSending = false;
         isStreaming = false;
         currentController = null;
         currentTimeoutId = null;
